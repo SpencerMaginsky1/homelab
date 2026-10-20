@@ -45,7 +45,7 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
 
 ## 1. The day before: backups and a "before" record
 
-- [ ] **1.1 Bring 25.04 fully up to date and clean**
+- [x] **1.1 Bring 25.04 fully up to date and clean** _(done 2026-10-20: 0 updates pending, dpkg clean, no reboot needed. `autoremove` doesn't actually remove the old 6.14.0-29 kernel, only `grub-pc-bin`; both are left for the release upgrade to clean up)_
   ```bash
   sudo apt update && sudo apt full-upgrade -y
   sudo apt autoremove --purge -y          # also removes the orphaned 6.14.0-29 kernel
@@ -53,7 +53,7 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
   ```
   If the update needed a reboot, reboot now and check everything is back up (README §5).
 
-- [ ] **1.2 Save a "before" record** to compare against afterwards
+- [x] **1.2 Save a "before" record** _(done 2026-10-20 14:42, 9 files in `~/upgrade-2604/before/`)_ to compare against afterwards
   ```bash
   mkdir -p ~/upgrade-2604/before && cd ~/upgrade-2604/before
   sudo ufw status verbose          > ufw.txt
@@ -67,26 +67,30 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
   dpkg -l                          > packages.txt
   ```
 
-- [ ] **1.3 Back up everything a reinstall would need**
+- [x] **1.3 Back up everything a reinstall would need** _(done 2026-10-20 14:44: all 4 archives verified, Minecraft snapshot 3896e7f3)_
   ```bash
+  touch ~/.homelab-maintenance                            # stop the watchdog restarting the apps mid-backup
   sudo mc-backup now                                      # fresh Minecraft restore point
   sudo tar czf ~/upgrade-2604/etc.tgz /etc                # all system config (ufw, sysctl, dispatcher, /etc/*.conf, mc-backup.pass, duckdns token)
   cd ~/Desktop/docker && docker compose stop && (cd homarr && docker compose stop) && (cd uptime-kuma && docker compose stop) && (cd beszel && docker compose stop)
   sudo tar czf ~/upgrade-2604/docker-dirs.tgz -C ~/Desktop docker
   sudo tar czf ~/upgrade-2604/docker-volumes.tgz /var/lib/docker/volumes   # Dawarich's Postgres and other named volumes
   docker start $(docker ps -aq)                           # bring them back up for now
-  sudo chown spencer: ~/upgrade-2604/*.tgz
+  sudo tar czf ~/upgrade-2604/mc-restic.tgz /var/backups/minecraft-restic   # Minecraft backups, for the PC copy (about 1.3 GB)
+  sudo chown spencer: ~/upgrade-2604/*.tgz && chmod 600 ~/upgrade-2604/*.tgz
+  rm -f ~/.homelab-maintenance
   ls -lh ~/upgrade-2604/
   ```
-  `etc.tgz` holds secrets (the ntfy topic, DuckDNS token and `mc-backup.pass`), so treat the file like a password.
+  The apps are down for 1–2 minutes. `etc.tgz` and `docker-dirs.tgz` hold secrets (ntfy topic, DuckDNS token, `mc-backup.pass`, the `.env` files and Beszel's key), so treat them like passwords.
 
-- [ ] **1.4 Copy the backups off the machine.** There's no second drive yet, so use the Windows PC. From PowerShell on the PC:
+- [x] **1.4 Copy the backups off the machine.** _(done 2026-10-20 14:49 to `C:\Users\Spencer Maginsky\server-backup-2604`, sizes match exactly)_ There's no second drive yet, so use the Windows PC. From PowerShell on the PC:
   ```powershell
-  mkdir $HOME\server-backup-2604
-  scp spencer@192.168.1.179:~/upgrade-2604/*.tgz $HOME\server-backup-2604\
-  scp -r spencer@192.168.1.179:/home/spencer/Desktop/Claud $HOME\server-backup-2604\
+  mkdir "$HOME\server-backup-2604"
+  scp spencer@192.168.1.179:~/upgrade-2604/*.tgz "$HOME\server-backup-2604"
+  scp -r spencer@192.168.1.179:/home/spencer/Desktop/Claud "$HOME\server-backup-2604"
   ```
-  Also copy the Minecraft restic repository. It's root-only, so first make a readable copy on the server: `sudo tar czf ~/upgrade-2604/mc-restic.tgz /var/backups/minecraft-restic && sudo chown spencer: ~/upgrade-2604/mc-restic.tgz` (about 1.3 GB), then `scp` it the same way. The world itself is in there.
+  Keep the quotes and leave off the trailing `\`: the Windows user folder has a space in it, which otherwise breaks scp's path.
+  The `*.tgz` includes `mc-restic.tgz`, the Minecraft restic repository (about 1.3 GB, made in step 1.3). The world itself is in there.
 
 - [ ] **1.5 Tell your Minecraft friends** about the downtime window.
 
