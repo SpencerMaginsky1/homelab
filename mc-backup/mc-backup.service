@@ -1,0 +1,10 @@
+[Unit]
+Description=Minecraft world backup (restic, live)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/mc-backup backup
+TimeoutStartSec=1h
+Nice=10
+IOSchedulingClass=idle

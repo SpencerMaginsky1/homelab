@@ -1,0 +1,17 @@
+[Unit]
+Description=GolfApp (Caddie Voice) web server (port 8001, LAN + tailnet via ufw)
+After=network.target
+
+[Service]
+User=spencer
+Group=spencer
+ExecStart=/usr/bin/python3 /usr/local/bin/golf-serve /home/spencer/Desktop/GolfApp 8001 0.0.0.0
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

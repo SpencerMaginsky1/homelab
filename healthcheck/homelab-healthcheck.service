@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily homelab health check (ntfy report)
+Wants=network-online.target
+After=network-online.target tailscaled.service docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/homelab-healthcheck
+TimeoutStartSec=10min

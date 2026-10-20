@@ -1,0 +1,17 @@
+[Unit]
+Description=Homelab docs web server (README + network diagram, localhost only)
+After=network.target
+
+[Service]
+User=spencer
+Group=spencer
+ExecStart=/usr/bin/python3 -m http.server 8000 --bind 127.0.0.1 --directory /home/spencer/Desktop/Claud
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

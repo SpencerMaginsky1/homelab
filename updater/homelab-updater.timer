@@ -1,0 +1,9 @@
+[Unit]
+Description=Run homelab updater daily at 04:00 New York time
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target

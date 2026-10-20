@@ -1,0 +1,8 @@
+[Unit]
+Description=Update DuckDNS with the home public IP
+Wants=network-online.target
+After=network-online.target NetworkManager-dispatcher.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/duckdns-update

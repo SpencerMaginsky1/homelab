@@ -1,0 +1,253 @@
+#!/usr/bin/env bash
+# Daily health check for Spencer-Server: system, network/exit node, tailnet, services.
+# Sends a summary to ntfy; when something is wrong, Claude (headless, no tools) writes a
+# plain-English summary on top of the raw findings.
+#
+# Installed to /usr/local/bin/homelab-healthcheck, run as root by homelab-healthcheck.timer.
+# Config: /etc/homelab-healthcheck.conf   Manual run: sudo homelab-healthcheck [--dry-run]
+set -uo pipefail
+
+CONF=/etc/homelab-healthcheck.conf
+[[ -r $CONF ]] && source "$CONF"
+: "${NTFY_URL:?set NTFY_URL in $CONF}"
+: "${EXPECTED_EXIT_IP:=198.51.100.20}"
+: "${HOME_WAN_IP:=203.0.113.10}"
+: "${PI_TS_IP:=100.64.0.20}"
+: "${LAN_IF:=enp2s0}"
+: "${LAN_GW:=192.168.1.1}"
+: "${SYS_DISK:=/dev/disk/by-id/ata-PNY_CS900_500GB_SSD_PNY25122503210104B24}"
+: "${CLAUDE_USER:=spencer}"
+: "${CLAUDE_BIN:=/home/spencer/.local/bin/claude}"
+: "${README:=/home/spencer/Desktop/Claud/README.md}"
+: "${DUCKDNS_HOST:=example.duckdns.org}"
+DRY_RUN=0; [[ ${1:-} == --dry-run ]] && DRY_RUN=1
+
+FAILS=(); WARNS=(); OKS=()
+fail() { FAILS+=("$1"); }
+warn() { WARNS+=("$1"); }
+ok()   { OKS+=("$1"); }
+
+list() { (( $# )) && printf '  - %s\n' "$@" || echo "  (none)"; }
+http_ok() { curl -s -o /dev/null -m 8 -L -w '%{http_code}' "$1" | grep -qE '^(2|3)'; }
+
+# ---------------- System ----------------
+disk_pct=$(df --output=pcent / | tail -1 | tr -dc 0-9)
+if   (( disk_pct >= 90 )); then fail "Disk / is ${disk_pct}% full"
+elif (( disk_pct >= 80 )); then warn "Disk / is ${disk_pct}% full"
+else ok "Disk ${disk_pct}%"; fi
+
+mem_avail_mb=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
+if   (( mem_avail_mb < 512 ));  then fail "Only ${mem_avail_mb} MB RAM available"
+elif (( mem_avail_mb < 1536 )); then warn "Low RAM: ${mem_avail_mb} MB available"
+else ok "RAM $(awk "BEGIN{printf \"%.1f\", $mem_avail_mb/1024}") GB free"; fi
+
+load15=$(awk '{print $3}' /proc/loadavg)
+if awk "BEGIN{exit !($load15 > $(nproc))}"; then warn "High load: 15-min avg ${load15} on $(nproc) threads"
+else ok "Load ${load15}"; fi
+
+cpu_temp=0
+for h in /sys/class/hwmon/hwmon*; do
+  [[ $(cat "$h/name" 2>/dev/null) == coretemp ]] || continue
+  for t in "$h"/temp*_input; do v=$(( $(cat "$t") / 1000 )); (( v > cpu_temp )) && cpu_temp=$v; done
+done
+if   (( cpu_temp >= 90 )); then fail "CPU temperature ${cpu_temp}°C"
+elif (( cpu_temp >= 80 )); then warn "CPU temperature ${cpu_temp}°C"
+elif (( cpu_temp > 0 ));   then ok "CPU ${cpu_temp}°C"; fi
+
+failed_units=$(systemctl --failed --no-legend --plain | awk '{print $1}' | paste -sd, -)
+[[ -n $failed_units ]] && fail "Failed systemd units: $failed_units" || ok "No failed units"
+
+if [[ -e $SYS_DISK ]]; then
+  smart=$(smartctl -H -A "$SYS_DISK" 2>/dev/null)
+  if ! grep -qE 'PASSED|OK' <<<"$smart"; then fail "System SSD SMART health is not PASSED"
+  else
+    realloc=$(awk '$1==5 {print $10}' <<<"$smart"); pending=$(awk '$1==197 {print $10}' <<<"$smart")
+    if (( ${realloc:-0} > 0 || ${pending:-0} > 0 )); then warn "System SSD: ${realloc:-0} reallocated / ${pending:-0} pending sectors"
+    else ok "SSD SMART OK"; fi
+  fi
+else
+  warn "System disk $SYS_DISK not found for SMART check"
+fi
+
+up_s=$(cut -d. -f1 /proc/uptime)
+(( up_s < 86400 )) && warn "Server rebooted $(( up_s / 3600 ))h ago"
+uptime_h="$(( up_s / 86400 ))d $(( up_s % 86400 / 3600 ))h"
+
+updates=$(apt list --upgradable 2>/dev/null | grep -c upgradable || true)
+if [[ -e /var/run/reboot-required ]]; then
+  warn "Reboot required to finish updates ($(paste -sd, /var/run/reboot-required.pkgs 2>/dev/null | cut -c1-80))"
+fi
+
+# ---------------- Network / gateway ----------------
+ts_json=$(tailscale status --json 2>/dev/null)
+if [[ $(jq -r .BackendState <<<"$ts_json" 2>/dev/null) != Running ]]; then
+  fail "Tailscale is not running"
+else
+  ok "Tailscale up"
+  exit_online=$(jq -r '.ExitNodeStatus.Online // empty' <<<"$ts_json")
+  if [[ -z $exit_online ]]; then fail "No exit node is set (should be raspberrypi)"
+  elif [[ $exit_online != true ]]; then fail "Exit node raspberrypi is OFFLINE"
+  else ok "Exit node online"; fi
+fi
+
+pub_ip=$(curl -4 -s -m 10 https://ifconfig.me/ip || true)
+if   [[ -z $pub_ip ]]; then fail "No internet (public IP lookup failed)"
+elif [[ $pub_ip == "$HOME_WAN_IP" ]]; then fail "Traffic is NOT going through the Pi (public IP is home WAN $pub_ip)"
+elif [[ $pub_ip != "$EXPECTED_EXIT_IP" ]]; then warn "Public IP is $pub_ip, expected $EXPECTED_EXIT_IP (Pi's ISP IP may have changed)"
+else ok "Exiting via Pi ($pub_ip)"; fi
+
+# DuckDNS name must point at the HOME public IP (what friends connect to), not the Pi.
+lan_ip=$(ip -4 -o addr show dev "$LAN_IF" | awk '{split($4,a,"/"); print a[1]; exit}')
+home_ip=$(curl -4 -s -m 10 --interface "$lan_ip" https://ifconfig.me/ip || true)
+dd_ip=$(getent ahostsv4 "$DUCKDNS_HOST" | awk 'NR==1 {print $1}')
+if   [[ -z $dd_ip ]];   then warn "$DUCKDNS_HOST does not resolve"
+elif [[ -z $home_ip ]]; then warn "Could not determine home public IP to check $DUCKDNS_HOST"
+elif [[ $dd_ip != "$home_ip" ]]; then fail "$DUCKDNS_HOST points to $dd_ip but home IP is $home_ip (duckdns-update not working?)"
+else ok "$DUCKDNS_HOST → $home_ip"; fi
+
+rules=$(ip rule)
+grep -q '^5208:.*172.16.0.0/12 lookup main' <<<"$rules" || fail "Policy rule 5208 (Docker → main) missing"
+grep -q '^5209:.*lookup 128' <<<"$rules"                 || fail "Policy rule 5209 (LAN IP → table 128) missing"
+[[ $(sysctl -n net.ipv4.ip_forward) == 1 ]]                       || fail "IP forwarding is off (gateway broken)"
+[[ $(sysctl -n net.ipv4.conf.$LAN_IF.send_redirects) == 0 ]]      || warn "ICMP redirects are on for $LAN_IF"
+ufw status 2>/dev/null | grep -q 'Status: active'                 || fail "ufw firewall is not active"
+iptables -t nat -S POSTROUTING 2>/dev/null | grep -q 'tailscale0.*MASQUERADE' || fail "Gateway NAT rule (MASQUERADE → tailscale0) missing"
+ping -c2 -W2 -q "$LAN_GW" >/dev/null 2>&1                         || fail "Router $LAN_GW not answering ping"
+getent hosts ntfy.sh >/dev/null                                   || fail "DNS resolution failing"
+
+# ---------------- Tailnet ----------------
+if ping -c3 -W3 -q "$PI_TS_IP" >/dev/null 2>&1; then ok "Pi reachable"
+else fail "raspberrypi ($PI_TS_IP) not answering over Tailscale"; fi
+timeout 5 bash -c "</dev/tcp/$PI_TS_IP/45876" 2>/dev/null || warn "Beszel agent on the Pi (port 45876) not reachable"
+
+# ---------------- Services ----------------
+if systemctl is-active -q docker; then
+  total=$(docker ps -aq | wc -l); running=$(docker ps -q | wc -l)
+  stopped=$(docker ps -a --filter status=exited --filter status=dead --filter status=created --format '{{.Names}}' | paste -sd, -)
+  unhealthy=$(docker ps --filter health=unhealthy --format '{{.Names}}' | paste -sd, -)
+  restarting=$(docker ps -a --filter status=restarting --format '{{.Names}}' | paste -sd, -)
+  [[ -n $stopped ]]    && fail "Containers not running: $stopped"
+  [[ -n $unhealthy ]]  && fail "Unhealthy containers: $unhealthy"
+  [[ -n $restarting ]] && fail "Containers crash-looping: $restarting"
+  ok "Containers ${running}/${total} running"
+else
+  fail "Docker is not running"
+fi
+
+declare -A WEB=(
+  [Homarr]=http://127.0.0.1:7575
+  ["Uptime Kuma"]=http://127.0.0.1:3001
+  [Beszel]=http://127.0.0.1:8090
+  [Dawarich]=http://127.0.0.1:3000/api/v1/health
+  [Plex]=http://127.0.0.1:32400/identity
+)
+web_bad=()
+for name in "${!WEB[@]}"; do http_ok "${WEB[$name]}" || web_bad+=("$name"); done
+(( ${#web_bad[@]} )) && fail "Web UI not responding: $(IFS=,; echo "${web_bad[*]}")" || ok "Web UIs OK"
+
+# GolfApp (friend's app, 3.12): a warning, not a failure
+http_ok http://127.0.0.1:8001/ || warn "GolfApp not responding on :8001 (systemctl status homelab-golf)"
+
+systemctl is-active -q snap.plexmediaserver.plexmediaserver || fail "Plex service is not active"
+
+runuser -u spencer -- tmux has-session -t minecraft 2>/dev/null || fail "Minecraft tmux session is missing"
+timeout 5 bash -c '</dev/tcp/127.0.0.1/25565' 2>/dev/null       && ok "Minecraft up" || fail "Minecraft not accepting connections on :25565"
+
+kuma_down=$(docker exec uptime-kuma sqlite3 -readonly /app/data/kuma.db \
+  "select m.name from monitor m join heartbeat h on h.id=(select max(id) from heartbeat where monitor_id=m.id)
+   where m.active=1 and h.status=0;" 2>/dev/null | paste -sd, -)
+kuma_total=$(docker exec uptime-kuma sqlite3 -readonly /app/data/kuma.db "select count(*) from monitor where active=1 and type!='group';" 2>/dev/null)
+[[ -n $kuma_down ]] && fail "Uptime Kuma monitors DOWN: $kuma_down" || ok "Kuma ${kuma_total:-?} monitors up"
+
+# ---------------- Watchdog activity (last 24h) ----------------
+wd_log=$(journalctl -t homelab-watchdog --since "-24h" --no-pager -o cat 2>/dev/null)
+wd_fixed=$(grep -oP '^FIXED \K\S+' <<<"$wd_log" | sort | uniq -c | awk '{printf "%s%s (%dx)", sep, $2, $1; sep=", "}')
+wd_failed=$(grep -oP '^FAILED \K[^:\s]+' <<<"$wd_log" | sort -u | paste -sd, -)
+[[ -n $wd_fixed ]]  && warn "Watchdog auto-restarted in last 24h: $wd_fixed"
+[[ -n $wd_failed ]] && fail "Watchdog restart attempts FAILED in last 24h: $wd_failed"
+
+# ---------------- Minecraft world backup ----------------
+if [[ -r /var/lib/mc-backup/last-success ]]; then
+  mcb_age_h=$(( ( $(date +%s) - $(cat /var/lib/mc-backup/last-success) ) / 3600 ))
+  mcb_sum=$(cat /var/lib/mc-backup/summary 2>/dev/null)
+  if   (( mcb_age_h > 72 )); then fail "Minecraft backup is ${mcb_age_h}h old (journalctl -t mc-backup)"
+  elif (( mcb_age_h > 26 )); then warn "Minecraft backup is ${mcb_age_h}h old - last night's run didn't succeed (journalctl -t mc-backup)"
+  else ok "MC backup ${mcb_age_h}h ago (${mcb_sum})"; fi
+elif systemctl is-enabled -q mc-backup.timer 2>/dev/null; then
+  fail "Minecraft backup has never succeeded (journalctl -t mc-backup)"
+fi
+
+# ---------------- Updater activity ----------------
+UPD_STATE=/var/lib/homelab-updater
+up_log=$(awk -F'|' -v c=$(( $(date +%s) - 86400 )) '$1 > c { sub(/^[0-9]+\|/, ""); print }' "$UPD_STATE/history.log" 2>/dev/null)
+up_done=$(grep -oP '^UPDATED \K[^:]+' <<<"$up_log" | sort -u | paste -sd, -)
+up_fail=$(grep -oP '^FAILED \K[^: ]+' <<<"$up_log" | sort -u | paste -sd, -)
+up_wait=$(ls "$UPD_STATE"/*.notified 2>/dev/null | xargs -rn1 basename | sed 's/\.notified$//' | paste -sd, -)
+up_held=$(ls "$UPD_STATE"/*.hold 2>/dev/null | xargs -rn1 basename | sed 's/\.hold$//' | paste -sd, -)
+[[ -n $up_done ]] && ok "Updated in last 24h: $up_done"
+[[ -n $up_fail ]] && fail "Update/rollback FAILED in last 24h: $up_fail (journalctl -t homelab-updater)"
+[[ -n $up_wait ]] && warn "Updates waiting for your approval: $up_wait (sudo homelab-updater apply <name>)"
+[[ -n $up_held ]] && warn "Updates on hold after a rollback: $up_held (sudo homelab-updater unhold <name>)"
+up_pull=$(grep -oP '^PULL FAILED \K[^: ]+' <<<"$up_log" | sort -u | paste -sd, -)
+[[ -n $up_pull ]] && warn "GitHub pull failed in last 24h: $up_pull (journalctl -t homelab-updater)"
+
+# ---------------- Build + send report ----------------
+host=$(hostname)
+n_fail=${#FAILS[@]}; n_warn=${#WARNS[@]}
+stats="Disk ${disk_pct}% · RAM $(awk "BEGIN{printf \"%.1f\", $mem_avail_mb/1024}")G free · CPU ${cpu_temp}°C · load ${load15}
+Exit: ${pub_ip:-?} · Home: ${home_ip:-?} · ${running:-?}/${total:-?} containers · Kuma ${kuma_total:-?} monitors
+Uptime ${uptime_h} · ${updates} package updates available${up_done:+ · updated: $up_done}
+MC backup: ${mcb_age_h:-?}h ago · ${mcb_sum:-no data}"
+
+report="Host: $host  Time: $(date '+%F %R %Z')
+FAILURES (${n_fail}):
+$(list "${FAILS[@]}")
+WARNINGS (${n_warn}):
+$(list "${WARNS[@]}")
+PASSED: $(IFS=';'; echo "${OKS[*]}")
+STATS:
+$stats"
+
+if (( n_fail == 0 && n_warn == 0 )); then
+  title="✅ $host: all checks passed"; prio=3; tags=white_check_mark
+  body="$stats"
+else
+  if (( n_fail )); then title="🚨 $host: $n_fail problem(s), $n_warn warning(s)"; prio=5; tags=rotating_light
+  else title="⚠️ $host: $n_warn warning(s)"; prio=4; tags=warning; fi
+  issues=$(printf '• %s\n' "${FAILS[@]}" "${WARNS[@]}" | grep -v '^• $')
+  summary=""
+  if [[ -x $CLAUDE_BIN ]]; then
+    summary=$(cd /tmp && { printf '%s\n' "$report"; [[ -r $README ]] && printf '\n===== README (how this server is set up) =====\n' && cat "$README"; } | timeout 180 runuser -u "$CLAUDE_USER" -- \
+      env HOME="/home/$CLAUDE_USER" "$CLAUDE_BIN" -p --model haiku --tools "" \
+      --no-session-persistence --strict-mcp-config \
+      "You are summarizing a daily home-server health check for the owner's phone notification.
+Context: Ubuntu server 'Spencer-Server' (LAN 192.168.1.179) routes all traffic through a Tailscale exit node
+(raspberrypi, 100.64.0.20) and acts as a LAN gateway; it runs Minecraft (tmux), Plex (snap) and Docker stacks
+(Homarr, Uptime Kuma, Beszel, Dawarich), plus a friend's golf web app (homelab-golf, port 8001). The health report comes first on stdin, then the server's README.
+Base every fix on how the README says this server is set up (e.g. NAT lives in /etc/ufw/before.rules,
+routing rules come from the NetworkManager dispatcher script) - never suggest generic alternatives
+like iptables-persistent. Write at most 5 short lines, plain text, no markdown: what is wrong, the likely
+cause, and the first command or step to fix it. Do not repeat the passed checks." 2>/dev/null | head -c 1500)
+  fi
+  if [[ -n $summary ]]; then body="$summary
+
+Details:
+$issues"
+  else body="$issues"; fi
+  body="$body
+
+$stats"
+fi
+
+if (( DRY_RUN )); then
+  printf 'TITLE: %s\nPRIORITY: %s\n\n%s\n\n----- raw report -----\n%s\n' "$title" "$prio" "$body" "$report"
+  exit 0
+fi
+
+curl -s -m 20 -o /dev/null -w '%{http_code}' \
+  -H "Title: $title" -H "Priority: $prio" -H "Tags: $tags" \
+  --data-binary "$body" "$NTFY_URL" | grep -q '^200$' \
+  || { echo "ntfy send failed" >&2; logger -t homelab-healthcheck "ntfy send failed: $title"; }
+logger -t homelab-healthcheck "$title"
+echo "$report"
+exit 0   # problems are reported via ntfy; a non-zero exit would mark the unit failed and self-report tomorrow

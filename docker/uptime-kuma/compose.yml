@@ -1,0 +1,8 @@
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:2
+    container_name: uptime-kuma
+    network_mode: host          # UI on :3001; can reach localhost + tailnet directly
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

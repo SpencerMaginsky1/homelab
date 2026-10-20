@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# mc-backup - live, deduplicated Minecraft world backups with restic.
+#
+#   mc-backup                      nightly backup (timer, 03:30) + retention (7 daily / 4 weekly / 6 monthly)
+#                                  if players are online: chat warning 5 min before + 10 s countdown
+#   mc-backup now                  back up immediately, no player warnings
+#   mc-backup list                 show restore points
+#   mc-backup restore [ID|latest]  stop server, set current world aside, restore, start (asks to confirm; --yes to skip)
+#   mc-backup check                verify the repository's integrity (also runs automatically on Sundays)
+#   mc-backup stats                repository size
+#
+# Live backup: tells the server "save-off" + "save-all flush", snapshots, then ALWAYS "save-on" again.
+# Repository: /var/backups/minecraft-restic   Password: /etc/mc-backup.pass (root-only; keep a copy elsewhere!)
+set -uo pipefail
+
+CONF=/etc/homelab-healthcheck.conf
+[[ -r $CONF ]] && source "$CONF"
+: "${NTFY_URL:=}"
+export RESTIC_REPOSITORY=${RESTIC_REPOSITORY:-/var/backups/minecraft-restic}
+export RESTIC_PASSWORD_FILE=${RESTIC_PASSWORD_FILE:-/etc/mc-backup.pass}
+RESTIC=${RESTIC:-restic}
+STATE=${MCB_STATE:-/var/lib/mc-backup}
+FLAG=${UPDATER_FLAG:-/run/homelab-updating}     # pauses the watchdog during a restore
+MC_DIR="/home/spencer/Desktop/MineCraft Server"
+MC_USER=spencer
+PATHS=(world server.properties whitelist.json ops.json banned-players.json banned-ips.json start.sh)
+KEEP=(--keep-daily 7 --keep-weekly 4 --keep-monthly 6)
+WARN_SECONDS=${MCB_WARN_SECONDS:-300}            # heads-up before the backup when players are online
+FORCE_WARN=${MCB_FORCE_WARN:-}                   # testing: announce even with nobody online
+
+if [[ $EUID -ne 0 && -z ${HOMELAB_TEST:-} ]]; then echo "run with sudo"; exit 1; fi
+mkdir -p "$STATE"
+exec 7>"$STATE/.lock"; flock -n 7 || { echo "another mc-backup is running"; exit 1; }
+
+log()    { logger -t mc-backup "$*" 2>/dev/null; [[ -t 1 ]] && echo "$*"; true; }  # echo only on a terminal: under systemd stdout is journaled under the same tag
+notify() { [[ -n $NTFY_URL ]] && curl -s -m 20 -o /dev/null -H "Title: $1" -H "Priority: $2" -H "Tags: $3" --data-binary "$4" "$NTFY_URL"; true; }
+as_mc()  { if [[ $EUID -eq 0 ]]; then runuser -u "$MC_USER" -- "$@"; else "$@"; fi; }
+console(){ as_mc tmux send-keys -t minecraft "$1" Enter; }
+running(){ pgrep -u "$MC_USER" -f '^java .*server\.jar nogui' >/dev/null; }
+port_up(){ timeout 5 bash -c '</dev/tcp/127.0.0.1/25565' 2>/dev/null; }
+loglines(){ wc -l < "$MC_DIR/logs/latest.log" 2>/dev/null || echo 0; }
+wait_log() {  # start-line pattern timeout
+  local from=$1 pat=$2 t=$3
+  for ((i = 0; i < t; i++)); do tail -n +"$((from + 1))" "$MC_DIR/logs/latest.log" 2>/dev/null | grep -q "$pat" && return 0; sleep 1; done
+  return 1
+}
+players() {  # how many are online right now (asks the console, reads the reply from the log)
+  local from; from=$(loglines); console "list"
+  wait_log "$from" "There are [0-9]* of a max" 10 || { echo 0; return; }
+  tail -n +"$((from + 1))" "$MC_DIR/logs/latest.log" | grep -oP 'There are \K[0-9]+(?= of a max)' | tail -1
+}
+chat()      { console "tellraw @a {\"text\":\"[Backup] $1\",\"color\":\"${2:-gold}\"}"; }
+actionbar() { console "title @a actionbar {\"text\":\"$1\",\"color\":\"${2:-yellow}\"}"; }
+announce() {  # 5-minute heads-up + 10 s countdown, only if someone is online
+  local n; n=$(players)
+  if (( ${n:-0} == 0 )) && [[ -z $FORCE_WARN ]]; then return; fi
+  log "players online: ${n:-0} - announcing backup in $((WARN_SECONDS / 60)) min"
+  chat "Server backup in $((WARN_SECONDS / 60)) minutes. You may notice a brief lag spike - nothing to worry about."
+  ANNOUNCED=1
+  sleep $((WARN_SECONDS > 10 ? WARN_SECONDS - 10 : 0))
+  chat "Backup starting in 10 seconds..." yellow
+  for ((c = 10; c >= 1; c--)); do actionbar "Backup in $c..."; sleep 1; done
+  chat "Backing up now - possible lag spike for a few seconds." yellow
+}
+ANNOUNCED=0
+fail() { log "FAILED: $1"; (( ANNOUNCED )) && chat "Backup hit a problem - the server is fine, the admin has been notified." red; notify "🚨 Minecraft backup failed" 5 rotating_light "$1
+Check: journalctl -t mc-backup -n 30"; exit 1; }
+
+SAVE_PAUSED=0
+resume_saving() { (( SAVE_PAUSED )) && { console "save-on"; SAVE_PAUSED=0; log "save-on sent"; }; }
+trap resume_saving EXIT                                   # never leave the server with saving switched off
+
+backup() {  # [now]
+  "$RESTIC" cat config >/dev/null 2>&1 || fail "restic repository not found/readable at $RESTIC_REPOSITORY"
+  local start mode=offline
+  if running; then
+    mode=live
+    [[ ${1:-} == now ]] || announce
+    start=$(loglines); console "save-off"; SAVE_PAUSED=1
+    wait_log "$start" "Automatic saving is now disabled\|Saving is already turned off" 30 || log "warning: no save-off confirmation in log"
+    start=$(loglines); console "save-all flush"
+    wait_log "$start" "Saved the game" 180 || fail "server didn't confirm 'save-all flush' within 3 min (saving re-enabled)"
+  fi
+  log "backup started ($mode)"
+  local out
+  out=$(cd "$MC_DIR" && "$RESTIC" backup --host spencer-server --tag minecraft --tag "$mode" "${PATHS[@]}" 2>&1) \
+    || fail "restic backup error: $(tail -3 <<<"$out")"
+  resume_saving
+  (( ANNOUNCED )) && chat "Backup complete - thanks for your patience!" green
+  log "backup done: $(grep -E '^(Added to the repository|snapshot .* saved)' <<<"$out" | paste -sd' ')"
+  "$RESTIC" forget --tag minecraft "${KEEP[@]}" --prune >/dev/null 2>&1 || log "warning: forget/prune failed"
+  if [[ $(date +%u) == 7 ]]; then
+    "$RESTIC" check --read-data-subset=10% >/dev/null 2>&1 || fail "weekly integrity check FAILED - the backups may be damaged"
+    log "weekly integrity check OK"
+  fi
+  date +%s > "$STATE/last-success"
+  printf 'snapshots=%s size=%s\n' "$("$RESTIC" snapshots --json 2>/dev/null | jq length)" \
+    "$("$RESTIC" stats --mode raw-data --json 2>/dev/null | jq -r '.total_size' | numfmt --to=iec 2>/dev/null)" > "$STATE/summary"
+  log "OK $(cat "$STATE/summary")"
+}
+
+restore() {  # [ID|latest] [--yes]
+  local id=${1:-latest} yes=${2:-} ts aside tmp
+  [[ $id == --yes ]] && { id=latest; yes=--yes; }
+  "$RESTIC" snapshots "$id" >/dev/null 2>&1 || { echo "no such snapshot: $id  (see: mc-backup list)"; exit 1; }
+  echo "Restoring snapshot '$id':"; "$RESTIC" snapshots "$id" 2>/dev/null | sed -n '3,4p'
+  if [[ $yes != --yes ]]; then
+    read -rp "This stops the server and replaces the world (current one is kept aside). Type 'restore' to continue: " a
+    [[ $a == restore ]] || { echo "cancelled"; exit 1; }
+  fi
+  touch "$FLAG"; trap 'rm -f "$FLAG"; resume_saving' EXIT
+  ts=$(date +%Y%m%d-%H%M%S); aside="$MC_DIR/world.before-restore-$ts"; tmp="$MC_DIR/.restore-$ts"
+  log "RESTORE $id starting"
+  if running; then
+    console "say Server restarting for a world restore in 10 seconds"; sleep 10
+    console "stop"; for ((i = 0; i < 180; i += 3)); do running || break; sleep 3; done
+    running && fail "server didn't stop - restore aborted, nothing changed"
+  fi
+  # backups are taken from inside $MC_DIR, so the snapshot stores /world, /server.properties, ...
+  "$RESTIC" restore "$id" --target "$tmp" --include /world >/dev/null 2>&1 \
+    || { rm -rf "$tmp"; fail "restic restore failed - nothing changed (server is stopped; start it with: tmux attach -t minecraft, ./start.sh)"; }
+  [[ -f $tmp/world/level.dat ]] || { rm -rf "$tmp"; fail "restored data has no world/level.dat - nothing changed"; }
+  mv "$MC_DIR/world" "$aside" && mv "$tmp/world" "$MC_DIR/world" && rm -rf "$tmp"
+  as_mc tmux has-session -t minecraft 2>/dev/null || as_mc tmux new-session -d -s minecraft -c "$MC_DIR"
+  console "cd '$MC_DIR' && ./start.sh"
+  for ((i = 0; i < 300; i += 5)); do port_up && break; sleep 5; done
+  if port_up; then
+    log "RESTORED $id (previous world kept at $(basename "$aside"))"
+    notify "♻️ Minecraft world restored" 4 recycle "Restored snapshot $id and the server is up.
+Previous world kept at: $(basename "$aside") - delete it once you're happy (rm -rf it, ~$(du -sh "$aside" | cut -f1))."
+  else
+    fail "server didn't come back up after restore (previous world kept at $(basename "$aside"))"
+  fi
+}
+
+case ${1:-backup} in
+  backup)  backup ;;
+  now)     backup now ;;
+  list)    "$RESTIC" snapshots --compact ;;
+  restore) restore "${2:-latest}" "${3:-}" ;;
+  check)   "$RESTIC" check --read-data-subset=10% ;;
+  stats)   "$RESTIC" stats --mode raw-data; [[ -f $STATE/summary ]] && cat "$STATE/summary" ;;
+  *)       sed -n '2,13p' "$0"; exit 1 ;;
+esac

@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# Watchdog for Spencer-Server, run every 15 min by homelab-watchdog.timer.
+# Only fixes what doesn't fix itself:
+#   - Minecraft not running            -> start it in its tmux session (never force-kills a running server)
+#   - docker/tailscaled/plex "failed"   -> reset-failed + start (systemd gave up after its start limit)
+#   - Plex/Homarr/Beszel hung (web UI not answering 2 runs in a row) -> restart
+#   - container "unhealthy" 2 runs in a row -> restart (Docker never does this itself)
+# Pushes to ntfy only when something changes (fixed / fix failed / recovered). No Claude usage.
+# Pause: touch /home/spencer/.homelab-maintenance  (ignored once older than 24h)
+# Manual: sudo homelab-watchdog [--dry-run]
+set -uo pipefail
+
+CONF=/etc/homelab-healthcheck.conf
+[[ -r $CONF ]] && source "$CONF"
+: "${NTFY_URL:?set NTFY_URL in $CONF}"
+STATE=/var/lib/homelab-watchdog
+MAINT=/home/spencer/.homelab-maintenance
+MC_DIR="/home/spencer/Desktop/MineCraft Server"
+MC_USER=spencer
+MAX_ATTEMPTS=3          # per service ...
+WINDOW=$((6 * 3600))    # ... per 6 hours
+DRY_RUN=0; [[ ${1:-} == --dry-run ]] && DRY_RUN=1
+
+mkdir -p "$STATE"
+if (( DRY_RUN )); then tmp=$(mktemp -d); cp -a "$STATE/." "$tmp/" 2>/dev/null; STATE=$tmp; fi
+exec 9>"$STATE/.lock"; flock -n 9 || exit 0            # never overlap with a previous run
+
+log() { logger -t homelab-watchdog "$*"; [[ -t 1 ]] && echo "$*"; true; }  # echo only on a terminal: under systemd stdout would duplicate each line (and double the 8 AM FIXED counts)
+notify() {  # title priority tags body
+  (( DRY_RUN )) && { echo "[dry-run] would notify: $1 — $4"; return; }
+  curl -s -m 20 -o /dev/null -H "Title: $1" -H "Priority: $2" -H "Tags: $3" --data-binary "$4" "$NTFY_URL" \
+    || log "ntfy send failed: $1"
+}
+
+# homelab-updater is mid-update (services stopped on purpose): stay out of its way.
+[[ -e /run/homelab-updating ]] && exit 0
+
+# Give the boot-time cron start of Minecraft (and Docker) time to finish.
+(( $(cut -d. -f1 /proc/uptime) < 600 )) && exit 0
+
+if [[ -e $MAINT ]]; then
+  if (( $(date +%s) - $(stat -c %Y "$MAINT") < 86400 )); then
+    log "maintenance mode ($MAINT present) - no repairs"; exit 0
+  fi
+  log "ignoring stale maintenance file $MAINT (older than 24h)"
+fi
+
+# ---- per-service state: strikes (consecutive bad runs), attempts (timestamps), alerted flag ----
+strike()      { local n; n=$(( $(cat "$STATE/$1.strikes" 2>/dev/null || echo 0) + 1 )); echo $n > "$STATE/$1.strikes"; echo $n; }
+attempts_ok() {
+  local f="$STATE/$1.attempts" now; now=$(date +%s)
+  [[ -f $f ]] && awk -v c=$((now - WINDOW)) '$1 > c' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  (( $(cat "$f" 2>/dev/null | wc -l) < MAX_ATTEMPTS ))
+}
+alert_once() {  # key title priority tags body
+  [[ -e $STATE/$1.alerted ]] && return
+  notify "$2" "$3" "$4" "$5"; (( DRY_RUN )) || touch "$STATE/$1.alerted"
+}
+healthy() {  # key label
+  rm -f "$STATE/$1.strikes"
+  if [[ -e $STATE/$1.alerted ]]; then
+    notify "✅ $2 is back up" 3 white_check_mark "$2 recovered on $(hostname) at $(date '+%R')."
+    rm -f "$STATE/$1.alerted"; log "RECOVERED $1"
+  fi
+}
+wait_for() {  # seconds command...
+  local t=$1; shift
+  for ((i = 0; i < t; i += 5)); do "$@" && return 0; sleep 5; done; return 1
+}
+remediate() {  # key label "fix command" "verify command"
+  local key=$1 label=$2 fix=$3 verify=$4
+  if ! attempts_ok "$key"; then
+    alert_once "$key" "🚨 $label is down - auto-restart limit reached" 5 rotating_light \
+      "$label has been restarted $MAX_ATTEMPTS times in 6h and is still failing. Leaving it alone; please take a look."
+    return
+  fi
+  log "FIX $key: $label is down, running $fix"
+  (( DRY_RUN )) && { echo "[dry-run] would run: $fix"; return; }
+  date +%s >> "$STATE/$key.attempts"
+  eval "$fix"
+  if wait_for 180 eval "$verify"; then
+    log "FIXED $key"
+    rm -f "$STATE/$key.strikes" "$STATE/$key.alerted"
+    notify "🔧 $label was down - restarted" 4 wrench "The watchdog restarted $label on $(hostname) at $(date '+%R') and it's answering again."
+  else
+    log "FAILED $key: $label still down after restart"
+    alert_once "$key" "🚨 $label is down - restart didn't help" 5 rotating_light \
+      "The watchdog tried to restart $label at $(date '+%R') but it's still not responding. Check it manually."
+  fi
+}
+http_ok() { curl -s -o /dev/null -m 8 -L -w '%{http_code}' "$1" | grep -qE '^(2|3)'; }
+
+# ---------------- Minecraft (no auto-restart of its own) ----------------
+mc_running() { pgrep -u "$MC_USER" -f '^java .*server\.jar nogui' >/dev/null; }
+mc_port()    { timeout 5 bash -c '</dev/tcp/127.0.0.1/25565' 2>/dev/null; }
+mc_start() {
+  local cmd="cd '$MC_DIR' && ./start.sh"
+  if ! runuser -u "$MC_USER" -- tmux has-session -t minecraft 2>/dev/null; then
+    runuser -u "$MC_USER" -- tmux new-session -d -s minecraft -c "$MC_DIR"; sleep 1
+  fi
+  runuser -u "$MC_USER" -- tmux send-keys -t minecraft "$cmd" Enter
+}
+if mc_running && mc_port; then
+  healthy minecraft "Minecraft"
+elif mc_running; then
+  # Process alive but not answering (starting up, or frozen). Never killed automatically.
+  if (( $(strike minecraft) >= 2 )); then
+    alert_once minecraft "⚠️ Minecraft is running but not responding" 4 warning \
+      "The Minecraft process is up but port 25565 hasn't answered for ~30 min. Not auto-killed (could damage the world). Check with: tmux attach -t minecraft"
+  fi
+else
+  sleep 60                                   # don't race a manual stop/start in progress
+  mc_running || remediate minecraft "Minecraft" mc_start mc_port
+fi
+
+# ---------------- systemd services stuck in "failed" ----------------
+for unit in docker tailscaled snap.plexmediaserver.plexmediaserver; do
+  case $unit in docker) label=Docker;; tailscaled) label=Tailscale;; *) label=Plex;; esac
+  state=$(systemctl show -p ActiveState --value "$unit")
+  if [[ $state == failed ]]; then
+    remediate "unit-$unit" "$label" "systemctl reset-failed $unit; systemctl start $unit" "systemctl is-active -q $unit"
+  elif [[ $state == active ]]; then
+    healthy "unit-$unit" "$label"
+  fi                                          # "inactive" = stopped on purpose: leave it
+done
+
+# ---------------- Plex hung (service active but not answering) ----------------
+plex_ok()      { http_ok http://127.0.0.1:32400/identity; }
+plex_restart() { systemctl restart snap.plexmediaserver.plexmediaserver; }
+if systemctl is-active -q snap.plexmediaserver.plexmediaserver; then
+  if plex_ok; then healthy plex-hung "Plex"
+  elif (( $(strike plex-hung) >= 2 )); then remediate plex-hung "Plex" plex_restart plex_ok; fi
+fi
+
+# ---------------- Docker containers ----------------
+if systemctl is-active -q docker; then
+  # Hung web UIs on containers without their own healthcheck
+  declare -A WEB=([homarr]=http://127.0.0.1:7575 [beszel]=http://127.0.0.1:8090)
+  for c in "${!WEB[@]}"; do
+    [[ $(docker inspect -f '{{.State.Running}}' "$c" 2>/dev/null) == true ]] || continue   # stopped on purpose / not present
+    if http_ok "${WEB[$c]}"; then healthy "web-$c" "$c"
+    elif (( $(strike "web-$c") >= 2 )); then remediate "web-$c" "$c" "docker restart $c >/dev/null" "http_ok ${WEB[$c]}"; fi
+  done
+
+  # Unhealthy containers (Docker reports them but never restarts them)
+  for c in $(docker ps --format '{{.Names}}'); do
+    h=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$c")
+    [[ -z $h ]] && continue
+    if [[ $h == unhealthy ]]; then
+      (( $(strike "hc-$c") >= 2 )) && remediate "hc-$c" "$c" "docker restart $c >/dev/null" \
+        "[[ \$(docker inspect -f '{{.State.Health.Status}}' $c) == healthy ]]"
+    elif [[ $h == healthy ]]; then
+      healthy "hc-$c" "$c"
+    fi
+  done
+fi
+exit 0

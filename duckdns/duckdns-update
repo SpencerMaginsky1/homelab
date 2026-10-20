@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Keep <DOMAIN>.duckdns.org pointed at the HOME public IP (not the Pi exit node).
+# The request is bound to the LAN IP, so policy rule 5209 (from 192.168.1.179 -> table 128)
+# sends it out the home WAN and DuckDNS auto-detects the home IP.
+# Config: /etc/duckdns.conf (root-only): DUCKDNS_DOMAIN=..., DUCKDNS_TOKEN=...
+# Installed to /usr/local/bin/duckdns-update, run every 5 min by duckdns-update.timer.
+set -uo pipefail
+source /etc/duckdns.conf
+: "${DUCKDNS_DOMAIN:?}" "${DUCKDNS_TOKEN:?}" "${LAN_IF:=enp2s0}"
+
+lan_ip=$(ip -4 -o addr show dev "$LAN_IF" | awk '{split($4,a,"/"); print a[1]; exit}')
+[[ -n $lan_ip ]] || { logger -t duckdns "no IPv4 on $LAN_IF"; exit 1; }
+
+# URL (with token) goes in via stdin so the token never shows up in the process list.
+resp=$(printf 'url = "https://www.duckdns.org/update?domains=%s&token=%s&verbose=true"\n' \
+         "$DUCKDNS_DOMAIN" "$DUCKDNS_TOKEN" | curl -4 -s -m 20 --interface "$lan_ip" -K - | tr '\n' ' ')
+
+case $resp in
+  OK*UPDATED*)  logger -t duckdns "updated $DUCKDNS_DOMAIN.duckdns.org -> $(awk '{print $2}' <<<"$resp")" ;;
+  OK*NOCHANGE*) : ;;                                   # quiet when nothing changed
+  *)            logger -t duckdns "update FAILED for $DUCKDNS_DOMAIN: ${resp:-no response}"; exit 1 ;;
+esac

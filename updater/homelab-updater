@@ -1,0 +1,392 @@
+#!/usr/bin/env bash
+# homelab-updater - daily updates with backups, health checks, auto-rollback and ntfy pushes.
+#
+#   homelab-updater                 daily run (timer, 04:00): auto-update "auto" services,
+#                                   notify for "ask" services, notice Plex snap updates
+#   homelab-updater check           show what's out of date (pulls images, changes nothing running)
+#   homelab-updater apply <svc>     update one service now (needed for "ask" services); --force = even if current
+#                                   (for a git repo such as golfapp: pull it from GitHub now)
+#   homelab-updater rollback <svc> [backup-id]   restore the previous version (+ its data) and hold it
+#   homelab-updater unhold <svc>    allow updates again after a rollback
+#   homelab-updater status          versions, holds and backups
+#   homelab-rollback <svc>          same as "homelab-updater rollback <svc>"
+#
+# Services: homarr, uptime-kuma, beszel (auto) · dawarich, minecraft (ask) · plex (snap auto-updates itself)
+#           golfapp (git: fast-forward pull of main from GitHub, as $REPO_USER; never overwrites local work)
+# Backups:  /var/backups/homelab/<svc>/<YYYYmmdd-HHMMSS>/  (last 3 kept; Minecraft last 2)
+set -uo pipefail
+[[ $(basename "$0") == homelab-rollback ]] && set -- rollback "$@"
+
+CONF=/etc/homelab-healthcheck.conf
+[[ -r $CONF ]] && source "$CONF"
+: "${NTFY_URL:=}"
+BACKUP_ROOT=${BACKUP_ROOT:-/var/backups/homelab}
+STATE=${UPDATER_STATE:-/var/lib/homelab-updater}
+FLAG=${UPDATER_FLAG:-/run/homelab-updating}          # watchdog pauses while this exists
+KEEP=3; KEEP_MC=2
+DOCKER_DIR=/home/spencer/Desktop/docker
+MC_DIR="/home/spencer/Desktop/MineCraft Server"
+MC_USER=spencer
+ALPINE=alpine:3.20
+
+declare -A DIR=([homarr]=$DOCKER_DIR/homarr [uptime-kuma]=$DOCKER_DIR/uptime-kuma
+                [beszel]=$DOCKER_DIR/beszel [dawarich]=$DOCKER_DIR)
+declare -A POLICY=([homarr]=auto [uptime-kuma]=auto [beszel]=auto [dawarich]=ask [minecraft]=ask [plex]=snap [golfapp]=git)
+REPO_USER=spencer
+declare -A REPO=([golfapp]=/home/spencer/Desktop/GolfApp)   # served by homelab-golf.service, so a pull goes live there at once
+declare -A DATA=([homarr]="bind:appdata" [uptime-kuma]="bind:data" [beszel]="bind:beszel_data"
+                 [dawarich]="vol:docker_dawarich_db_data vol:docker_dawarich_public vol:docker_dawarich_shared vol:docker_dawarich_storage vol:docker_dawarich_watched")
+declare -A HEALTH=([homarr]=http://127.0.0.1:7575 [uptime-kuma]=http://127.0.0.1:3001
+                   [beszel]=http://127.0.0.1:8090 [dawarich]=http://127.0.0.1:3000/api/v1/health)
+DOCKER_STACKS=(homarr uptime-kuma beszel dawarich)
+
+if [[ $EUID -ne 0 && -z ${HOMELAB_TEST:-} ]]; then echo "run with sudo"; exit 1; fi
+mkdir -p "$STATE" "$BACKUP_ROOT"
+exec 8>"$STATE/.lock"; flock -n 8 || { echo "another updater run is in progress"; exit 1; }
+
+log()    {  # journal + own history file (the daily report reads the history, so test runs elsewhere never count)
+  logger -t homelab-updater "$*" 2>/dev/null; [[ -t 1 ]] && echo "$*"  # terminal only; under systemd stdout is journaled too
+  printf '%s|%s\n' "$(date +%s)" "$*" >> "$STATE/history.log"
+}
+notify() {  # title priority tags body
+  [[ -n $NTFY_URL ]] || return 0
+  curl -s -m 20 -o /dev/null -H "Title: $1" -H "Priority: $2" -H "Tags: $3" --data-binary "$4" "$NTFY_URL" \
+    || log "ntfy send failed: $1"
+}
+as_mc()   { if [[ $EUID -eq 0 ]]; then runuser -u "$MC_USER" -- "$@"; else "$@"; fi; }
+compose() { local s=$1; shift; (cd "${DIR[$s]}" && docker compose "$@"); }
+http_ok() { curl -s -o /dev/null -m 8 -L -w '%{http_code}' "$1" | grep -qE '^(2|3)'; }
+begin()   { touch "$FLAG"; }
+finish()  { rm -f "$FLAG"; }
+trap finish EXIT
+known()   { [[ -n ${POLICY[$1]:-} ]] || { echo "unknown service '$1' (homarr uptime-kuma beszel dawarich minecraft plex golfapp)"; exit 1; }; }
+
+img_ver() {  # human version for an image id/ref
+  local v; v=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$1" 2>/dev/null)
+  if [[ -z $v || $v =~ ^(main|latest|master|dev)$ ]]; then
+    v="$(docker image inspect -f '{{.Created}}' "$1" 2>/dev/null | cut -c1-10) ($(docker image inspect -f '{{.Id}}' "$1" 2>/dev/null | cut -c8-14))"
+  fi
+  echo "$v"
+}
+
+# =====================================================================  Docker stacks
+CHANGES=()
+stack_check() {  # pulls; fills CHANGES with "svc: old -> new"; returns 0 if an update is available
+  local s=$1 c svc ref cur new
+  CHANGES=()
+  compose "$s" pull -q >/dev/null 2>&1 || { log "pull failed for $s"; return 1; }
+  for c in $(compose "$s" ps -a -q); do
+    svc=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$c")
+    ref=$(docker inspect -f '{{.Config.Image}}' "$c"); cur=$(docker inspect -f '{{.Image}}' "$c")
+    new=$(docker image inspect -f '{{.Id}}' "$ref" 2>/dev/null)
+    [[ -n $new && $new != "$cur" ]] && CHANGES+=("$svc: $(img_ver "$cur") → $(img_ver "$new")")
+  done
+  (( ${#CHANGES[@]} ))
+}
+
+stack_healthy() {  # all containers running (+healthy if they have a healthcheck) and web UI answers
+  local s=$1 c st h
+  for c in $(compose "$s" ps -a -q); do
+    st=$(docker inspect -f '{{.State.Status}}' "$c"); [[ $st == running ]] || return 1
+    h=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$c")
+    [[ -z $h || $h == healthy ]] || return 1
+  done
+  http_ok "${HEALTH[$s]}"
+}
+wait_healthy() { local s=$1 t=${2:-300}; for ((i = 0; i < t; i += 5)); do stack_healthy "$s" && return 0; sleep 5; done; return 1; }
+
+data_backup() {  # svc dir
+  local s=$1 d=$2 spec kind name
+  for spec in ${DATA[$s]}; do
+    kind=${spec%%:*}; name=${spec#*:}
+    if [[ $kind == bind ]]; then
+      docker run --rm -v "${DIR[$s]}/$name":/src:ro -v "$d":/dst "$ALPINE" tar czf "/dst/bind-$name.tgz" -C /src . || return 1
+    else
+      docker run --rm -v "$name":/src:ro -v "$d":/dst "$ALPINE" tar czf "/dst/vol-$name.tgz" -C /src . || return 1
+    fi
+  done
+}
+data_restore() {  # svc dir
+  local s=$1 d=$2 spec kind name
+  for spec in ${DATA[$s]}; do
+    kind=${spec%%:*}; name=${spec#*:}
+    if [[ $kind == bind ]]; then
+      docker run --rm -v "${DIR[$s]}/$name":/dst -v "$d":/b:ro "$ALPINE" \
+        sh -c "find /dst -mindepth 1 -delete && tar xzf /b/bind-$name.tgz -C /dst" || return 1
+    else
+      docker run --rm -v "$name":/dst -v "$d":/b:ro "$ALPINE" \
+        sh -c "find /dst -mindepth 1 -delete && tar xzf /b/vol-$name.tgz -C /dst" || return 1
+    fi
+  done
+}
+
+prune() {  # svc keep
+  local s=$1 keep=$2 old t
+  for old in $(ls -1 "$BACKUP_ROOT/$s" 2>/dev/null | sort | head -n -"$keep"); do
+    [[ -f $BACKUP_ROOT/$s/$old/images ]] && while IFS='|' read -r _ _ t _; do docker rmi "$t" >/dev/null 2>&1; done < "$BACKUP_ROOT/$s/$old/images"
+    rm -rf "${BACKUP_ROOT:?}/$s/$old"; log "pruned old backup $s/$old"
+  done
+}
+
+stack_apply() {  # svc [force]
+  local s=$1 force=${2:-} ts d c svc ref cur tag summary
+  if ! stack_check "$s" && [[ -z $force ]]; then log "$s is up to date"; return 0; fi
+  summary=$(printf '%s\n' "${CHANGES[@]:-(forced, same version)}")
+  ts=$(date +%Y%m%d-%H%M%S); d="$BACKUP_ROOT/$s/$ts"; mkdir -p "$d"
+  begin
+  for c in $(compose "$s" ps -a -q); do                       # remember exactly what was running
+    svc=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$c")
+    ref=$(docker inspect -f '{{.Config.Image}}' "$c"); cur=$(docker inspect -f '{{.Image}}' "$c")
+    tag="homelab-rollback:$s.$svc.$ts"; docker tag "$cur" "$tag"
+    echo "$svc|$ref|$tag|$(img_ver "$cur")" >> "$d/images"
+  done
+  cp -p "${DIR[$s]}"/*compose*.y*ml "$d/" 2>/dev/null
+  log "UPDATING $s (backup $ts): $(tr '\n' ';' <<<"$summary")"
+  compose "$s" stop >/dev/null 2>&1
+  if ! data_backup "$s" "$d"; then
+    log "FAILED $s: backup failed - not updating"; compose "$s" up -d >/dev/null 2>&1
+    notify "🚨 $s update aborted" 5 rotating_light "Backup failed, so nothing was changed. $s was restarted on its current version."
+    finish; return 1
+  fi
+  compose "$s" up -d >/dev/null 2>&1
+  if wait_healthy "$s" 300; then
+    log "UPDATED $s: $(tr '\n' ';' <<<"$summary")"
+    notify "🆙 Updated $s" 3 arrow_up "$summary
+Healthy after update. Undo: sudo homelab-rollback $s"
+    rm -f "$STATE/$s.notified"; prune "$s" "$KEEP"
+  else
+    log "FAILED $s: unhealthy after update - rolling back"
+    stack_rollback "$s" "$ts" "the update to [$(tr '\n' ';' <<<"$summary")] didn't come up healthy"
+  fi
+  finish
+}
+
+stack_rollback() {  # svc [ts] [reason]
+  local s=$1 ts=${2:-} reason=${3:-manual rollback} d svc ref tag ver vers=""
+  [[ -n $ts ]] || ts=$(ls -1 "$BACKUP_ROOT/$s" 2>/dev/null | sort | tail -1)
+  d="$BACKUP_ROOT/$s/$ts"
+  [[ -n $ts && -f $d/images ]] || { echo "no backup found for $s"; return 1; }
+  begin
+  log "ROLLBACK $s to backup $ts ($reason)"
+  compose "$s" stop >/dev/null 2>&1
+  data_restore "$s" "$d" || log "WARNING: data restore for $s reported errors"
+  while IFS='|' read -r svc ref tag ver; do docker tag "$tag" "$ref"; vers+="$svc: $ver"$'\n'; done < "$d/images"
+  compose "$s" up -d >/dev/null 2>&1
+  touch "$STATE/$s.hold"                                     # don't re-apply the same update tomorrow
+  if wait_healthy "$s" 300; then
+    log "ROLLEDBACK $s to $ts"
+    notify "↩️ Rolled back $s" 4 leftwards_arrow_with_hook "Reason: $reason
+Now running:
+${vers}Data restored from $ts. Auto-updates for $s are ON HOLD - run: sudo homelab-updater unhold $s"
+  else
+    log "FAILED $s: still unhealthy after rollback"
+    notify "🚨 $s is down after rollback" 5 rotating_light "Rolled back to $ts but it isn't healthy. Check: cd ${DIR[$s]} && docker compose logs --tail 50"
+  fi
+  finish
+}
+
+# =====================================================================  Minecraft (vanilla)
+mc_current() { unzip -p "$MC_DIR/server.jar" version.json 2>/dev/null | jq -r '.id // .name'; }
+mc_latest()  { curl -s -m 20 https://piston-meta.mojang.com/mc/game/version_manifest_v2.json | jq -r '.latest.release'; }
+mc_running() { pgrep -u "$MC_USER" -f '^java .*server\.jar nogui' >/dev/null; }
+mc_port()    { timeout 5 bash -c '</dev/tcp/127.0.0.1/25565' 2>/dev/null; }
+mc_players() {  # number online (asks the console, reads the log)
+  mc_running || { echo 0; return; }
+  as_mc tmux send-keys -t minecraft "list" Enter; sleep 2
+  grep -oP 'There are \K[0-9]+(?= of a max)' "$MC_DIR/logs/latest.log" | tail -1
+}
+mc_stop() {
+  mc_running || return 0
+  as_mc tmux send-keys -t minecraft "stop" Enter
+  for ((i = 0; i < 180; i += 3)); do mc_running || return 0; sleep 3; done; return 1
+}
+mc_start() {
+  as_mc tmux has-session -t minecraft 2>/dev/null || { as_mc tmux new-session -d -s minecraft -c "$MC_DIR"; sleep 1; }
+  as_mc tmux send-keys -t minecraft "cd '$MC_DIR' && ./start.sh" Enter
+}
+mc_up_on() {  # version timeout - port answers and log shows that version
+  for ((i = 0; i < $2; i += 5)); do
+    mc_port && grep -q "Starting minecraft server version $1" "$MC_DIR/logs/latest.log" 2>/dev/null && return 0; sleep 5
+  done; return 1
+}
+
+mc_apply() {  # [force]
+  local force=${1:-} cur new meta url sha ts d n
+  cur=$(mc_current); new=$(mc_latest)
+  [[ -n $new ]] || { log "could not read Mojang version manifest"; return 1; }
+  if [[ $cur == "$new" && -z $force ]]; then log "minecraft is up to date ($cur)"; return 0; fi
+  n=$(mc_players); if (( ${n:-0} > 0 )) && [[ $force != --force ]]; then
+    log "minecraft update skipped: $n player(s) online"; echo "$n player(s) online - try later or use --force"; return 1
+  fi
+  meta=$(curl -s -m 20 https://piston-meta.mojang.com/mc/game/version_manifest_v2.json | jq -r --arg v "$new" '.versions[] | select(.id==$v) | .url')
+  read -r url sha < <(curl -s -m 20 "$meta" | jq -r '.downloads.server | "\(.url) \(.sha1)"')
+  [[ $url == http* ]] || { log "no server download for $new"; return 1; }
+  begin
+  curl -s -m 300 -o "$MC_DIR/.server.jar.new" "$url"
+  if [[ $(sha1sum "$MC_DIR/.server.jar.new" | cut -d' ' -f1) != "$sha" ]]; then
+    rm -f "$MC_DIR/.server.jar.new"; log "FAILED minecraft: download checksum mismatch"
+    notify "🚨 Minecraft $new download failed" 5 rotating_light "Checksum mismatch - nothing was changed."; finish; return 1
+  fi
+  ts=$(date +%Y%m%d-%H%M%S); d="$BACKUP_ROOT/minecraft/$ts"; mkdir -p "$d"
+  log "UPDATING minecraft $cur → $new (backup $ts)"
+  mc_stop || { log "FAILED minecraft: server didn't stop"; rm -f "$MC_DIR/.server.jar.new"; finish; return 1; }
+  if ! tar czf "$d/server.tgz" -C "$MC_DIR" world server.jar server.properties whitelist.json ops.json \
+         banned-players.json banned-ips.json start.sh 2>/dev/null; then
+    log "FAILED minecraft: backup failed - not updating"; rm -f "$MC_DIR/.server.jar.new"; mc_start
+    notify "🚨 Minecraft update aborted" 5 rotating_light "World backup failed, so nothing was changed. Server restarted on $cur."; finish; return 1
+  fi
+  echo "$cur" > "$d/version"
+  install -o "$MC_USER" -g "$MC_USER" -m 664 "$MC_DIR/.server.jar.new" "$MC_DIR/server.jar" 2>/dev/null \
+    || cp "$MC_DIR/.server.jar.new" "$MC_DIR/server.jar"
+  rm -f "$MC_DIR/.server.jar.new"
+  mc_start
+  if mc_up_on "$new" 600; then
+    log "UPDATED minecraft: $cur → $new"
+    notify "🆙 Minecraft updated to $new" 4 arrow_up "Server updated $cur → $new and is accepting connections.
+Players must update their game to $new to join.
+World backup: $ts. Undo (loses anything built since): sudo homelab-rollback minecraft"
+    rm -f "$STATE/minecraft.notified"; prune minecraft "$KEEP_MC"
+  else
+    log "FAILED minecraft: $new didn't come up - rolling back"
+    mc_rollback "$ts" "Minecraft $new didn't start within 10 minutes"
+  fi
+  finish
+}
+
+mc_rollback() {  # [ts] [reason]
+  local ts=${1:-} reason=${2:-manual rollback} d ver
+  [[ -n $ts ]] || ts=$(ls -1 "$BACKUP_ROOT/minecraft" 2>/dev/null | sort | tail -1)
+  d="$BACKUP_ROOT/minecraft/$ts"; [[ -f $d/server.tgz ]] || { echo "no minecraft backup found"; return 1; }
+  ver=$(cat "$d/version")
+  begin
+  log "ROLLBACK minecraft to $ver (backup $ts, $reason)"
+  mc_stop
+  rm -rf "${MC_DIR:?}/world"
+  tar xzf "$d/server.tgz" -C "$MC_DIR"                        # restores world, jar, settings (owners preserved)
+  touch "$STATE/minecraft.hold"
+  mc_start
+  if mc_up_on "$ver" 600; then
+    log "ROLLEDBACK minecraft to $ver"
+    notify "↩️ Minecraft rolled back to $ver" 4 leftwards_arrow_with_hook "Reason: $reason
+World restored from $ts (anything built after that is gone). Updates ON HOLD - run: sudo homelab-updater unhold minecraft"
+  else
+    log "FAILED minecraft: not up after rollback"
+    notify "🚨 Minecraft down after rollback" 5 rotating_light "Check: tmux attach -t minecraft"
+  fi
+  finish
+}
+
+# =====================================================================  Plex (snap updates itself)
+plex_check() {
+  local now old
+  now=$(snap list plexmediaserver 2>/dev/null | awk 'NR==2 {print $2" (rev "$3")"}')
+  old=$(cat "$STATE/plex.version" 2>/dev/null)
+  if [[ -n $old && -n $now && $now != "$old" ]]; then
+    log "UPDATED plex: $old → $now (snap auto-refresh)"
+    notify "🆙 Plex updated (automatic)" 3 arrow_up "Plex snap updated $old → $now. Undo: sudo homelab-rollback plex"
+  fi
+  [[ -n $now ]] && echo "$now" > "$STATE/plex.version"
+}
+plex_rollback() {
+  log "ROLLBACK plex (snap revert)"
+  snap revert plexmediaserver && snap refresh --hold plexmediaserver >/dev/null && touch "$STATE/plex.hold"
+  plex_check
+  notify "↩️ Plex rolled back" 4 leftwards_arrow_with_hook "Now $(cat "$STATE/plex.version"). Auto-refresh ON HOLD - run: sudo homelab-updater unhold plex"
+}
+
+# =====================================================================  Git repos (pull main from GitHub)
+as_repo() { if [[ $EUID -eq 0 ]]; then runuser -u "$REPO_USER" -- env HOME="/home/$REPO_USER" "$@"; else "$@"; fi; }
+git_pull() {  # name - fast-forward only; skips (never discards) local work
+  local s=$1 d=${REPO[$1]} b old new n out
+  local g=(as_repo git -C "$d")
+  [[ -d $d/.git ]] || { log "PULL SKIPPED $s: $d is not a git clone"; return 1; }
+  b=$("${g[@]}" symbolic-ref --short -q HEAD)
+  [[ $b == main ]] || { log "PULL SKIPPED $s: on branch '${b:-detached}', not main"; return 0; }
+  [[ -z $("${g[@]}" status --porcelain --untracked-files=no) ]] \
+    || { log "PULL SKIPPED $s: uncommitted local changes in $d"; return 0; }
+  old=$("${g[@]}" rev-parse HEAD)
+  if ! out=$("${g[@]}" pull -q --ff-only origin main 2>&1); then
+    log "PULL FAILED $s: $(tr '\n' ' ' <<<"$out")"
+    notify "⚠️ $s: GitHub pull failed" 3 warning "$out
+Check: cd $d && git status"
+    return 1
+  fi
+  new=$("${g[@]}" rev-parse HEAD)
+  if [[ $new == "$old" ]]; then log "$s is up to date (${new:0:7})"; return 0; fi
+  n=$("${g[@]}" rev-list --count "$old..$new")
+  log "UPDATED $s: ${old:0:7} → ${new:0:7} ($n commit(s) from GitHub)"
+  notify "🆙 $s updated from GitHub" 2 arrow_up "${old:0:7} → ${new:0:7}, $n commit(s):
+$("${g[@]}" log --format='- %s' "$old..$new" | head -10)"
+}
+
+# =====================================================================  commands
+notify_available() {  # svc details...
+  local s=$1 key; shift; key=$(printf '%s' "$*" | md5sum | cut -c1-12)
+  [[ $(cat "$STATE/$s.notified" 2>/dev/null) == "$key" ]] && return   # already told you about this one
+  log "AVAILABLE $s: $*"
+  notify "📦 Update available: $s" 3 package "$*
+Not applied automatically. To update (with backup + auto-rollback): sudo homelab-updater apply $s"
+  echo "$key" > "$STATE/$s.notified"
+}
+
+daily() {
+  local s
+  for s in "${DOCKER_STACKS[@]}"; do
+    if [[ -e $STATE/$s.hold ]]; then log "HELD $s (rolled back earlier; 'unhold' to resume)"; continue; fi
+    stack_check "$s" || continue
+    if [[ ${POLICY[$s]} == auto ]]; then stack_apply "$s"
+    else notify_available "$s" "$(printf '%s\n' "${CHANGES[@]}")"; fi
+  done
+  if [[ -e $STATE/minecraft.hold ]]; then log "HELD minecraft"
+  else
+    local cur new; cur=$(mc_current); new=$(mc_latest)
+    [[ -n $new && $cur != "$new" ]] && notify_available minecraft "Minecraft $cur → $new (stable release).
+Players will need to update their game to $new too."
+  fi
+  plex_check
+  for s in "${!REPO[@]}"; do git_pull "$s"; done
+}
+
+status() {
+  local s
+  echo "Minecraft: running $(mc_current), latest stable $(mc_latest)$([[ -e $STATE/minecraft.hold ]] && echo '  [HELD]')"
+  echo "Plex:      $(snap list plexmediaserver 2>/dev/null | awk 'NR==2 {print $2" (rev "$3")"}')$([[ -e $STATE/plex.hold ]] && echo '  [HELD]')"
+  for s in "${DOCKER_STACKS[@]}"; do
+    printf '%-12s policy=%-4s%s\n' "$s" "${POLICY[$s]}" "$([[ -e $STATE/$s.hold ]] && echo '  [HELD]')"
+  done
+  for s in "${!REPO[@]}"; do
+    printf '%-12s policy=git   %s\n' "$s" "$(as_repo git -C "${REPO[$s]}" log -1 --format='%h %cr: %s' 2>/dev/null || echo "no clone at ${REPO[$s]}")"
+  done
+  echo; echo "Backups ($BACKUP_ROOT):"
+  for s in "${DOCKER_STACKS[@]}" minecraft; do
+    [[ -d $BACKUP_ROOT/$s ]] && printf '  %-12s %s\n' "$s" "$(ls -1 "$BACKUP_ROOT/$s" | sort -r | paste -sd' ')"
+  done; true
+}
+
+case ${1:-daily} in
+  daily) daily ;;
+  check)
+    for s in "${DOCKER_STACKS[@]}"; do
+      if stack_check "$s"; then printf '%s: UPDATE AVAILABLE\n%s\n' "$s" "$(printf '  %s\n' "${CHANGES[@]}")"; else echo "$s: up to date"; fi
+    done
+    echo "minecraft: running $(mc_current), latest stable $(mc_latest)"
+    echo "plex: $(snap list plexmediaserver 2>/dev/null | awk 'NR==2 {print $2}') (snap updates itself)"
+    for s in "${!REPO[@]}"; do
+      as_repo git -C "${REPO[$s]}" fetch -q origin main 2>/dev/null
+      n=$(as_repo git -C "${REPO[$s]}" rev-list --count HEAD..origin/main 2>/dev/null)
+      echo "$s: ${n:-?} new commit(s) on GitHub"
+    done ;;
+  apply)    known "${2:?service}"
+            case $2 in minecraft) mc_apply "${3:-}" ;; plex) echo "Plex updates itself via snap ('sudo snap refresh plexmediaserver')";;
+                       golfapp) git_pull "$2" ;;
+                       *) rm -f "$STATE/$2.hold"; stack_apply "$2" "${3:-}" ;; esac ;;
+  rollback) known "${2:?service}"
+            case $2 in minecraft) mc_rollback "${3:-}" ;; plex) plex_rollback ;;
+                       golfapp) echo "golfapp has no rollback here: GitHub is the source of truth (revert there; the next pull picks it up)" ;;
+                       *) stack_rollback "$2" "${3:-}" ;; esac ;;
+  unhold)   known "${2:?service}"; rm -f "$STATE/$2.hold"
+            [[ $2 == plex ]] && snap refresh --unhold plexmediaserver >/dev/null
+            log "UNHELD $2"; echo "$2: updates resumed" ;;
+  status)   status ;;
+  *) sed -n '2,13p' "$0"; exit 1 ;;
+esac

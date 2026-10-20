@@ -1,0 +1,19 @@
+networks:
+  homarr:
+    driver_opts:
+      com.docker.network.bridge.name: br-homarr   # fixed name so ufw can allow it to reach Kuma/Beszel
+
+services:
+  homarr:
+    image: ghcr.io/homarr-labs/homarr:latest
+    container_name: homarr
+    # Not host networking: Homarr runs internal services on 3000/3001/6379 that clash with dawarich/Kuma
+    networks:
+      - homarr
+    ports:
+      - '7575:7575'
+    volumes:
+      - ./appdata:/appdata
+    environment:
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY}   # set in .env; keep it with appdata backups
+    restart: unless-stopped
