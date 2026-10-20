@@ -75,7 +75,7 @@
   <!-- Spencer-Server -->
   <rect x="310" y="320" width="460" height="637" rx="12" fill="#23262d" stroke="#c9ced6" stroke-width="2"/>
   <text x="330" y="347" class="h">Spencer-Server</text>
-  <text x="330" y="368" class="s">Ubuntu 25.04 · i7-4790K · 15 GiB RAM · 457 GB</text>
+  <text x="330" y="368" class="s">Ubuntu 26.04 LTS (kernel 6.14) · i7-4790K · 15 GiB · 457 GB</text>
   <text x="330" y="388" class="t">enp2s0 <tspan font-weight="600">192.168.1.179</tspan> · tailscale0 <tspan font-weight="600">100.64.0.10</tspan></text>
 
   <text x="330" y="418" class="t" font-weight="700">Services</text>

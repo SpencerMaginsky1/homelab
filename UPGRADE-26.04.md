@@ -1,6 +1,8 @@
 # Upgrade plan: Ubuntu 25.04 → 26.04.1 LTS
 
-Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** (no monitor needed). **Not done yet.** Tick the boxes as you go.
+Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** (no monitor needed). **DONE 2026-10-20**: the server is on Ubuntu 26.04.1 LTS.
+
+> **What happened (2026-10-20):** the release upgrade itself went fine (15:18 reboot into 26.04, all checks passed). During step 4.1's Docker/Tailscale update, the new **kernel 7.0** threw 117 SATA "host bus error" exceptions on the SSD link (`ata4`, Intel 9-series AHCI) and the server crashed at 15:23, leaving `docker-ce` half-configured. It came back on 7.0 at 15:36 (88 more errors), was switched to the old **6.14 kernel** with `grub-reboot` at 15:40, and has had 0 errors since. Recovery: `dpkg --configure -a` finished Docker, 6.14 was pinned as `GRUB_DEFAULT` and marked manual, and the exit node came back on with port 1022 closed. SMART passed (0 read/CRC errors, 100% life), so the drive is fine; it's the 7.0 driver. The only file hit by the crash was `/var/lib/apt/extended_states`, which was rewritten cleanly, and `dpkg --verify` found no changed files. Getting 7.0 working is a to-do in README §9.
 
 **Why:** 25.04 (Plucky) is **end of life**, so it gets no more security updates. Minecraft is open to the internet, so the server should be on a supported release. 26.04 is an **LTS**, supported until 2031, so this is the last release upgrade for years.
 
@@ -98,21 +100,21 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
 
 ## 2. Right before: quiet the server
 
-- [ ] **2.1 Pause the watchdog**
+- [x] **2.1 Pause the watchdog** _(done 2026-10-20 14:56)_
   ```bash
   touch ~/.homelab-maintenance
   ```
-- [ ] **2.2 Stop Minecraft cleanly.** Make sure nobody is online, then:
+- [x] **2.2 Stop Minecraft cleanly.** _(done 14:56, 0 players, all worlds saved)_ Make sure nobody is online, then:
   ```bash
   tmux attach -t minecraft      # type: stop   … wait for the server to exit, then Ctrl-b d
   ```
-- [ ] **2.3 Make sure no timer job will fire mid-upgrade**
+- [x] **2.3 Make sure no timer job will fire mid-upgrade** _(done 14:58)_
   ```bash
   sudo systemctl stop homelab-updater.timer mc-backup.timer homelab-healthcheck.timer
   ```
   Leave DuckDNS and the watchdog alone. The watchdog is paused by the flag.
 
-- [ ] **2.4 Turn off the exit node, and open the upgrader's backup SSH port to the LAN**
+- [x] **2.4 Turn off the exit node, and open the upgrader's backup SSH port to the LAN**
   ```bash
   sudo tailscale set --exit-node=                   # server's internet now goes straight out the home router
   curl -4 -s ifconfig.me; echo                      # now shows the HOME IP (203.0.113.10), not the Pi's
@@ -120,7 +122,7 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
   ```
   Devices you've set up to use the server as their gateway ("tunneled LAN clients") lose internet until step 4.3. Switch them back to the router for now if they need it.
 
-- [ ] **2.5 Check your SSH setup from the PC.** Use the LAN address, not Tailscale:
+- [x] **2.5 Check your SSH setup from the PC.** _(done: 3 LAN SSH sessions from 192.168.1.159; exit node off, public IP = home)_ Use the LAN address, not Tailscale:
   ```powershell
   ssh spencer@192.168.1.179
   ```
@@ -130,7 +132,7 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
 
 ## 3. The upgrade
 
-- [ ] **3.1 Start it inside tmux** (in the first SSH window)
+- [x] **3.1 Start it inside tmux** (in the first SSH window)
   ```bash
   tmux new -s upgrade
   sudo do-release-upgrade
@@ -140,7 +142,7 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
   - **If the connection drops:** reconnect (`ssh spencer@192.168.1.179`, or `-p 1022`) and run `tmux attach -t upgrade`. The upgrade keeps running while you're disconnected. **Don't start a second `do-release-upgrade`.**
   - You can detach on purpose with **Ctrl-b d** and reattach the same way.
 
-- [ ] **3.2 Answer the prompts**
+- [x] **3.2 Answer the prompts**
   - *"Third party sources disabled"*: **OK.** Step 4.1 fixes this.
   - *"Do you want to start the upgrade?"*: review the **remove** list. Old kernels and libraries are fine to remove. If it wants to remove **`docker-ce`, `containerd.io`, `tailscale`, `openjdk-25-jre-headless`, `restic`, `ufw` or `network-manager`**, answer **No** and investigate first.
   - *"Configuration file … modified … install the package maintainer's version?"*: **`N` (keep yours)** for anything you customised, especially **`/etc/ufw/before.rules`**, `/etc/ssh/sshd_config` and `/etc/samba/smb.conf`. If unsure, choose `D` to see the diff; keeping yours is the safe default.
@@ -148,7 +150,7 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
   - *"Remove obsolete packages?"*: **Yes**, unless the list includes anything named above.
   - *"Restart required"*: **Yes**, reboot. Your SSH sessions close; that's expected.
 
-- [ ] **3.3 Reconnect after the reboot.** Give it **3–5 minutes**, then from the PC:
+- [x] **3.3 Reconnect after the reboot.** Give it **3–5 minutes**, then from the PC:
   ```powershell
   ping 192.168.1.179
   ssh spencer@192.168.1.179
@@ -159,7 +161,7 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
 
 ## 4. After the reboot
 
-- [ ] **4.1 Re-enable the Docker and Tailscale repos for 26.04**
+- [x] **4.1 Re-enable the Docker and Tailscale repos for 26.04**
   ```bash
   lsb_release -ds                                   # Ubuntu 26.04.1 LTS
   ls /etc/apt/sources.list.d/                       # see what the upgrader renamed or disabled
@@ -172,7 +174,7 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
   ```
   If Docker or Tailscale doesn't publish a `resolute` repo yet, `apt update` will say so. Leave that file on `plucky` for now; the old packages keep working.
 
-- [ ] **4.2 Basics**
+- [x] **4.2 Basics**
   ```bash
   uname -r                                          # new 26.04 kernel
   systemctl --failed                                # ideally 0
@@ -180,7 +182,7 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
   [ -f /var/run/reboot-required ] && cat /var/run/reboot-required.pkgs   # reboot again if anything is listed
   ```
 
-- [ ] **4.3 Network: the fragile part.** First turn the exit node back on and close the temporary SSH port:
+- [x] **4.3 Network: the fragile part.** First turn the exit node back on and close the temporary SSH port:
   ```bash
   sudo tailscale set --exit-node=raspberrypi --exit-node-allow-lan-access=true
   sudo ufw delete allow from 192.168.1.0/24 to any port 1022 proto tcp
@@ -199,7 +201,7 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
   ```
   If the `before.rules` block is gone, restore it from the backup: `sudo tar xzf ~/upgrade-2604/etc.tgz -C / etc/ufw/before.rules && sudo ufw reload`.
 
-- [ ] **4.4 Services**
+- [x] **4.4 Services**
   ```bash
   docker ps --format '{{.Names}}\t{{.Status}}'     # all 9 up, healthchecks "healthy"
   java -version                                     # OpenJDK 25 (or newer)
@@ -210,7 +212,7 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
   ```
   Then check the Minecraft log shows "Done", and join the server yourself.
 
-- [ ] **4.5 Automation**
+- [x] **4.5 Automation**
   ```bash
   rm ~/.homelab-maintenance
   sudo systemctl start homelab-updater.timer mc-backup.timer homelab-healthcheck.timer
@@ -228,8 +230,8 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
 
 ## 5. Clean up and record
 
-- [ ] Update README.md: the OS in the Tailscale table (§1) and the "Last verified" line. Tick the to-do in §9. Then push the docs to GitHub: `~/Desktop/Claud/github/sync-repos.sh --push "Ubuntu 26.04 upgrade done"`.
-- [ ] `sudo ufw status | grep 1022`: must print nothing (the temporary rule from step 2.4 is gone).
+- [x] Update README.md: the OS in the Tailscale table (§1) and the "Last verified" line. Tick the to-do in §9. Then push the docs to GitHub: `~/Desktop/Claud/github/sync-repos.sh --push "Ubuntu 26.04 upgrade done"`.
+- [x] `sudo ufw status | grep 1022`: must print nothing (the temporary rule from step 2.4 is gone).
 - [ ] `sudo apt autoremove --purge`, after you've booted the new kernel at least once.
 - [ ] After a week with no problems, delete `~/upgrade-2604/` on the server. Keep the copy on the PC until the new drive is set up.
 
