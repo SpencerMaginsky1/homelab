@@ -492,7 +492,7 @@ sudo ufw reload
 Leave the policy-routing dispatcher in place unless you also remove whatever needed rule 5209.
 
 ## 9. Open to-dos
-- [ ] **Upgrade to Ubuntu 26.04.1 LTS.** 25.04 has been end of life since early 2026 and gets no security updates. Follow [UPGRADE-26.04.md](UPGRADE-26.04.md).
+- [ ] **Upgrade to Ubuntu 26.04.1 LTS.** 25.04 has been end of life since early 2026 and gets no security updates. Follow [UPGRADE-26.04.md](UPGRADE-26.04.md). It is done over SSH from the PC on the home LAN, inside `tmux`, with the exit node off. No monitor needed, but keep one and a USB keyboard handy in case it does not come back after the reboot.
 - [ ] Reserve `192.168.1.179` for this server in the router's DHCP settings.
 - [x] ~~Uptime Kuma status page `home`: add the Homarr and GolfApp monitors~~ (done 2026-10-17; all 6 monitors on the page).
 - [x] ~~Install the updated health check (GolfApp check)~~ (done 2026-10-17).

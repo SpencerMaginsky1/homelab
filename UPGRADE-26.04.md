@@ -1,6 +1,6 @@
 # Upgrade plan: Ubuntu 25.04 → 26.04.1 LTS
 
-Written 2026-10-16. **Not done yet.** Tick the boxes as you go.
+Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** (no monitor needed). **Not done yet.** Tick the boxes as you go.
 
 **Why:** 25.04 (Plucky) is **end of life**, so it gets no more security updates. Minecraft is open to the internet, so the server should be on a supported release. 26.04 is an **LTS**, supported until 2031, so this is the last release upgrade for years.
 
@@ -19,7 +19,9 @@ Written 2026-10-16. **Not done yet.** Tick the boxes as you go.
 
 **Expected time:** 1–2 hours in total, most of it downloading and unpacking. **Downtime:** Minecraft, Plex and the dashboards are down for roughly 45–90 min.
 
-**When:** in the daytime, at the machine, with nobody playing. **Not between 03:00 and 08:30**, when the backup, updater and health check timers run.
+**When:** in the daytime, with nobody playing. **Not between 03:00 and 08:30**, when the backup, updater and health check timers run.
+
+**How:** from the Windows PC over SSH on the **home network** (`ssh spencer@192.168.1.179`), **not** over Tailscale, because the upgrade restarts Tailscale partway through. Everything runs inside `tmux`, so a dropped connection doesn't interrupt the upgrade. **No monitor needed**, but keep a monitor cable and a **USB keyboard** where you can grab them: you only need them if the server doesn't come back on the network after the final reboot (see *If something goes wrong*).
 
 ---
 
@@ -27,7 +29,10 @@ Written 2026-10-16. **Not done yet.** Tick the boxes as you go.
 
 | Risk | Handling |
 |---|---|
-| SSH drops mid-upgrade and leaves a half-upgraded system | Do it **at the server's own keyboard and screen**. If you must use SSH, run it inside `tmux` (step 3.1). |
+| SSH drops mid-upgrade and leaves a half-upgraded system | The upgrade runs inside **`tmux`** (step 3.1), so it keeps going if SSH drops; reconnect and `tmux attach -t upgrade`. A second SSH window and the upgrader's backup SSH on port 1022 (opened for the LAN in step 2.4) are spare ways in. |
+| The SSH session runs over Tailscale, which gets upgraded and restarted | Connect over the **home LAN** (`192.168.1.179`), never `spencer-server` or `100.x` (step 2.5). |
+| Package downloads stall because the server's internet goes through the exit node while Tailscale is being upgraded | **Exit node off** for the upgrade (step 2.4), back on in step 4.3. |
+| Server doesn't come back on the network after the reboot, so SSH can't reach it | That's the one case that needs the **monitor and USB keyboard**. See *If something goes wrong*. |
 | `/etc/ufw/before.rules` gets replaced, losing the LAN-gateway NAT and MSS clamp (README 4.2) | When asked about a modified config file, **keep your version (`N`)**. `/etc` is backed up in step 1.3, and step 4.3 checks the block is still there. |
 | Docker and Tailscale repos get **disabled** by the upgrader, so they'd stop getting updates | Step 4.1 points them at `resolute` (26.04's codename) and re-enables them. |
 | A Docker upgrade restarts containers, and Dawarich's Postgres gets a new Docker version | The containers are already backed up (step 1.3). Images aren't changed by this, only the Docker engine. |
@@ -103,15 +108,33 @@ Written 2026-10-16. **Not done yet.** Tick the boxes as you go.
   ```
   Leave DuckDNS and the watchdog alone. The watchdog is paused by the flag.
 
+- [ ] **2.4 Turn off the exit node, and open the upgrader's backup SSH port to the LAN**
+  ```bash
+  sudo tailscale set --exit-node=                   # server's internet now goes straight out the home router
+  curl -4 -s ifconfig.me; echo                      # now shows the HOME IP (203.0.113.10), not the Pi's
+  sudo ufw allow from 192.168.1.0/24 to any port 1022 proto tcp comment 'upgrade backup ssh (temporary)'
+  ```
+  Devices you've set up to use the server as their gateway ("tunneled LAN clients") lose internet until step 4.3. Switch them back to the router for now if they need it.
+
+- [ ] **2.5 Check your SSH setup from the PC.** Use the LAN address, not Tailscale:
+  ```powershell
+  ssh spencer@192.168.1.179
+  ```
+  Open a **second** PowerShell window and SSH in the same way. Leave it logged in as a spare.
+
 ---
 
 ## 3. The upgrade
 
-- [ ] **3.1 Start it from the server's console** (or inside `tmux new -s upgrade` if over SSH)
+- [ ] **3.1 Start it inside tmux** (in the first SSH window)
   ```bash
+  tmux new -s upgrade
   sudo do-release-upgrade
   ```
-  If you're on SSH, it offers a backup SSH daemon on port 1022. ufw blocks that port, which is fine; the tmux session is what protects you. If SSH drops, log back in and run `tmux attach -t upgrade`.
+  - It warns that you're running over SSH and asks *"Continue running under SSH?"*: **`y`**.
+  - It says it's starting a backup SSH daemon on **port 1022**: press **Enter**. Step 2.4 opened that port to the LAN, so if normal SSH breaks you can use `ssh -p 1022 spencer@192.168.1.179`.
+  - **If the connection drops:** reconnect (`ssh spencer@192.168.1.179`, or `-p 1022`) and run `tmux attach -t upgrade`. The upgrade keeps running while you're disconnected. **Don't start a second `do-release-upgrade`.**
+  - You can detach on purpose with **Ctrl-b d** and reattach the same way.
 
 - [ ] **3.2 Answer the prompts**
   - *"Third party sources disabled"*: **OK.** Step 4.1 fixes this.
@@ -119,7 +142,14 @@ Written 2026-10-16. **Not done yet.** Tick the boxes as you go.
   - *"Configuration file … modified … install the package maintainer's version?"*: **`N` (keep yours)** for anything you customised, especially **`/etc/ufw/before.rules`**, `/etc/ssh/sshd_config` and `/etc/samba/smb.conf`. If unsure, choose `D` to see the diff; keeping yours is the safe default.
   - *"Restart services without asking?"*: **Yes.**
   - *"Remove obsolete packages?"*: **Yes**, unless the list includes anything named above.
-  - *"Restart required"*: **Yes**, reboot.
+  - *"Restart required"*: **Yes**, reboot. Your SSH sessions close; that's expected.
+
+- [ ] **3.3 Reconnect after the reboot.** Give it **3–5 minutes**, then from the PC:
+  ```powershell
+  ping 192.168.1.179
+  ssh spencer@192.168.1.179
+  ```
+  If it still doesn't answer after **10 minutes**, it's time for the monitor and USB keyboard. See *If something goes wrong* ("It won't boot" / "No network after boot").
 
 ---
 
@@ -146,7 +176,12 @@ Written 2026-10-16. **Not done yet.** Tick the boxes as you go.
   [ -f /var/run/reboot-required ] && cat /var/run/reboot-required.pkgs   # reboot again if anything is listed
   ```
 
-- [ ] **4.3 Network: the fragile part**
+- [ ] **4.3 Network: the fragile part.** First turn the exit node back on and close the temporary SSH port:
+  ```bash
+  sudo tailscale set --exit-node=raspberrypi --exit-node-allow-lan-access=true
+  sudo ufw delete allow from 192.168.1.0/24 to any port 1022 proto tcp
+  ```
+  Then check:
   ```bash
   grep -c 'LAN gateway via Tailscale exit node' /etc/ufw/before.rules   # must be 1
   sudo ufw status verbose | diff - ~/upgrade-2604/before/ufw.txt && echo ufw-same
@@ -162,12 +197,12 @@ Written 2026-10-16. **Not done yet.** Tick the boxes as you go.
 
 - [ ] **4.4 Services**
   ```bash
-  docker ps --format '{{.Names}}\t{{.Status}}'     # all 8 up, healthchecks "healthy"
+  docker ps --format '{{.Names}}\t{{.Status}}'     # all 9 up, healthchecks "healthy"
   java -version                                     # OpenJDK 25 (or newer)
   tmux ls                                           # minecraft session, started by @reboot
   snap services plexmediaserver
   systemctl status homelab-docs homelab-golf smbd ssh --no-pager | grep Active
-  for p in 7575 3001 8090 3000 32400/web/index.html 8000/ 8001/; do curl -s -o /dev/null -w "$p %{http_code}\n" http://127.0.0.1:$p; done
+  for p in 7575 3001 8090 3000/api/v1/health 32400/web/index.html 8000/ 8001/ 8100/health; do curl -s -o /dev/null -w "$p %{http_code}\n" http://127.0.0.1:$p; done
   ```
   Then check the Minecraft log shows "Done", and join the server yourself.
 
@@ -189,7 +224,8 @@ Written 2026-10-16. **Not done yet.** Tick the boxes as you go.
 
 ## 5. Clean up and record
 
-- [ ] Update README.md: the OS in the Tailscale table (§1) and the "Last verified" line. Tick the to-do in §9.
+- [ ] Update README.md: the OS in the Tailscale table (§1) and the "Last verified" line. Tick the to-do in §9. Then push the docs to GitHub: `~/Desktop/Claud/github/sync-repos.sh --push "Ubuntu 26.04 upgrade done"`.
+- [ ] `sudo ufw status | grep 1022`: must print nothing (the temporary rule from step 2.4 is gone).
 - [ ] `sudo apt autoremove --purge`, after you've booted the new kernel at least once.
 - [ ] After a week with no problems, delete `~/upgrade-2604/` on the server. Keep the copy on the PC until the new drive is set up.
 
@@ -201,8 +237,10 @@ Written 2026-10-16. **Not done yet.** Tick the boxes as you go.
 |---|---|
 | The upgrade stops with an error partway | Don't reboot. Run `sudo dpkg --configure -a`, then `sudo apt -f install`, then `sudo apt full-upgrade`. Logs are in `/var/log/dist-upgrade/`. |
 | It won't boot | At the GRUB menu (hold **Shift** or tap **Esc**), choose *Advanced options*, then the previous kernel. Once booted, fix forward with `sudo apt full-upgrade`. |
+| Server doesn't answer `ping` or SSH 10 min after the reboot | Plug in the **monitor and USB keyboard**. If you see a login screen, log in and follow "No network after boot". If it's stuck before that, follow "It won't boot". |
 | No network after boot | From the console: `nmcli dev status`, `sudo systemctl restart NetworkManager`, then `sudo /etc/NetworkManager/dispatcher.d/50-policy-routing enp2s0 up`. |
-| LAN SSH dies when the exit node is on | `sudo tailscale set --exit-node-allow-lan-access=true` (README §6). |
+| LAN SSH dies when the exit node is turned back on (step 4.3) | Use the monitor and keyboard, or the spare SSH window if it's still alive: `sudo tailscale set --exit-node-allow-lan-access=true` (README §6). Step 4.3 already sets this, so it shouldn't happen. |
+| SSH drops during the upgrade | Reconnect (`ssh spencer@192.168.1.179`, or `-p 1022`) and `tmux attach -t upgrade`. If `tmux` says there's no session and the upgrade isn't running (`pgrep -a do-release`), see "The upgrade stops with an error partway". |
 | A Docker container won't start | `docker logs <name>`. If the data is the problem, stop the stack and restore from `docker-dirs.tgz` / `docker-volumes.tgz`. |
 | Minecraft won't start | `tmux attach -t minecraft` and read the error. Check `java -version`. If OpenJDK 25 was removed: `sudo apt install openjdk-25-jre-headless`. |
 | Badly broken | Do a clean install of 26.04, then restore `/etc` pieces from `etc.tgz` (not the whole of `/etc`), Docker data from the tarballs, Minecraft from restic, and re-run each `install.sh` in `~/Desktop/Claud`. README.md is the rebuild guide. |
