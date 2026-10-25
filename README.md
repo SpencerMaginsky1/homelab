@@ -11,7 +11,7 @@ A self-hosted home server on Ubuntu, running Docker services, a Minecraft server
 | **Homarr** | Main dashboard: service tiles, Uptime Kuma status, system stats, notifications |
 | **Uptime Kuma** | Up/down monitoring for every service, with phone alerts |
 | **Beszel** | CPU, RAM, temperature, disk and network graphs |
-| **Dawarich** | Self-hosted location history (4 containers: app, worker, PostGIS, Redis) |
+| **Dawarich** | Self-hosted location history (3 containers: app with built-in job worker, PostGIS, Redis) |
 | **Minecraft server** | Java server for friends, reachable through a DuckDNS address |
 | **Plex** | Media streaming to the TV and other devices on the LAN |
 | **Web app hosting** | A friend's golf web app served to the LAN and tailnet for testing |

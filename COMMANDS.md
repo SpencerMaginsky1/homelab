@@ -18,7 +18,7 @@ Run after a reboot, or whenever something seems off.
 ```bash
 sudo homelab-healthcheck --dry-run                 # full check (~35 items), prints the report, sends nothing
 systemctl list-timers 'homelab-*' mc-backup.timer duckdns-update.timer   # all 5 timers scheduled
-docker ps --format '{{.Names}}\t{{.Status}}'       # 9 containers up / healthy
+docker ps --format '{{.Names}}\t{{.Status}}'       # 8 containers up / healthy
 tmux ls                                            # "minecraft" session exists
 curl -4 -s ifconfig.me; echo                       # 198.51.100.20 = traffic via the Pi exit node
 sudo homelab-updater status                        # versions, holds, update backups

@@ -102,7 +102,7 @@
 
     <rect x="545" y="520" width="207" height="40" rx="6" class="svc"/>
     <text x="648" y="537" class="t" text-anchor="middle" font-weight="600">Dawarich :3000</text>
-    <text x="648" y="552" class="s" text-anchor="middle">4 containers · docker_dawarich</text>
+    <text x="648" y="552" class="s" text-anchor="middle">3 containers · docker_dawarich</text>
 
     <rect x="328" y="566" width="207" height="40" rx="6" class="svc"/>
     <text x="431" y="583" class="t" text-anchor="middle" font-weight="600">SSH :22 · Samba</text>
