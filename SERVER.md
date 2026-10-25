@@ -51,7 +51,7 @@ MagicDNS works: `spencer-server`, `raspberrypi` and so on resolve on any tailnet
 | Hostname | `Spencer-Server` |
 | LAN IP | `192.168.1.179/24` on `enp2s0`, from DHCP. **Reserve this IP on the router.** Lots of things depend on it. |
 | Router / LAN gateway | `192.168.1.1` |
-| Samsung TV | `192.168.1.153`, Samsung CU7000 65" (Tizen). Plex client: streams straight from `192.168.1.179:32400` over the LAN, allowed by the ufw "plex LAN" rule. Uses the router as its gateway, so it isn't tunneled. Plex also discovers it as a DLNA renderer via SSDP. |
+| Samsung TV | `192.168.1.153`, Samsung CU7000 65" (Tizen). Plex client: streams straight from `192.168.1.179:32400` over the LAN, allowed by the ufw "plex LAN" rule. **Tunneled through the Pi on purpose** (the Pi's location is the main household, e.g. for Netflix): manual IP, gateway `192.168.1.179`, DNS `8.8.8.8`. **IPv6 must be off on the TV**: the apartment LAN gets IPv6 from the ISP (`2600:4041:…`), which bypasses this gateway, so with it on Netflix sees the TV flip between the Pi and the apartment and shows "update your household" (found 2026-10-25). Plex also discovers it as a DLNA renderer via SSDP. |
 | OS | **Ubuntu 26.04.1 LTS** (upgraded 2026-10-20, supported until 2031). Docker and Tailscale come from their `resolute` repos (`/etc/apt/sources.list.d/docker.sources`, `tailscale.sources`). |
 | Kernel | **Pinned to `6.14.0-37-generic`** via `GRUB_DEFAULT="Advanced options for Ubuntu>Ubuntu, with Linux 6.14.0-37-generic"` in `/etc/default/grub` (original saved as `grub.bak-2604`), and the 6.14 packages are marked manual so they're never auto-removed. **Why:** 26.04's kernel 7.0 throws SATA "host bus error" exceptions on this board's Intel 9-series AHCI controller (`ata4`, the SSD) and crashed mid-update. 6.14 has 0 errors. **Downside:** 6.14 gets no security updates on 26.04, so fixing 7.0 is a to-do (9). |
 | CPU / RAM / Disk | Intel i7-4790K, 15 GiB RAM, `/dev/sda2` 457 GB (PNY CS900 SSD, SMART healthy) |
@@ -238,7 +238,7 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
 - snap `plexmediaserver` (1.43.x), web UI at http://192.168.1.179:32400/web. Claimed by the Plex account.
 - **Library folder:** `~/Desktop/Plex_Server/Movies`. It was **empty** as of 2026-10-15, and will move to a new drive (see to-dos). The snap can read under `/home`. A drive mounted under `/mnt` or `/media` may need the snap's `removable-media` permission (`sudo snap connect plexmediaserver:removable-media`).
 - **Firewall:** port 32400 is allowed **from the LAN only** (4.4). Before that rule existed, app.plex.tv showed *"unable to connect securely"*, because ufw was silently dropping it.
-- **Samsung TV** (`192.168.1.153`, CU7000) uses the Plex app and streams directly over the LAN (see 2).
+- **Samsung TV** (`192.168.1.153`, CU7000) uses the Plex app and streams directly over the LAN (see 2). It uses this server as its gateway, but Plex is LAN-to-LAN, so the tunnel isn't involved.
 - **Remote Access (outside home) probably won't work:** plex.tv sees this server's public IP as the **Pi's** (`198.51.100.20`, because of the exit node), so a router port-forward at home won't line up. Away from home, use the Plex app over Tailscale instead. That also needs the optional Tailscale ufw rule in the to-dos.
 - **Jellyfin is not installed.** On 2026-10-15 the Jellyfin TV app froze on its logo because there was no Jellyfin server. The decision was to use Plex.
 - **Sizing for a future library** (a 2-hour film):
