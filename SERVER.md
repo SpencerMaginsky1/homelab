@@ -30,7 +30,7 @@ _Last verified: 2026-10-27 18:00: **Dawarich updated 1.17.0 → 1.18.1** (no com
 | Device | Tailscale IP | OS | Role |
 |---|---|---|---|
 | **spencer-server** (this machine) | `100.64.0.10` | Ubuntu 26.04.1 LTS (kernel 6.14, pinned) | Main server: Minecraft, Plex, Docker services, GolfApp, LAN gateway. **Uses the Pi as its exit node.** |
-| **raspberrypi** | `100.64.0.20` | Linux (Raspberry Pi OS) | **Exit node.** All of this server's internet traffic leaves from its location. WAN IP `198.51.100.20`. Runs a Beszel agent. |
+| **raspberrypi** | `100.64.0.20` | Raspberry Pi OS, Debian 12 "bookworm" (checked 2026-10-27) | **Exit node.** All of this server's internet traffic leaves from its location. WAN IP `198.51.100.20`. Runs a Beszel agent. |
 | **spencer** | `100.64.0.30` | Windows | Desktop PC |
 | **iphone-15-pro** | `100.64.0.40` | iOS | Phone. Use it to reach the dashboards when away from home. |
 | **friend-pc** | `100.64.0.50` | Linux | A node **shared from another account** (`a-friend@`, tailnet `other-tailnet`). Not mine to manage. |
