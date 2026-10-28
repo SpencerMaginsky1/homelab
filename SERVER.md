@@ -158,7 +158,7 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
 - **How players connect:**
   - **Friends on the internet** use **`example.duckdns.org`**. The DNS name points at the home IP (3.8), and the **router port-forwards TCP 25565** to `192.168.1.179`. Replies leave via the home WAN thanks to rule 5209 (4.3).
   - **On the home LAN**, use **`192.168.1.179`**. Connecting to the DuckDNS name from inside only works if the router supports NAT loopback.
-- **Exposed to the internet:** port 25565 is open to the world, and random scanners do try to join (e.g. `RandomPlayer123` from `203.0.113.x`). The **whitelist** (`white-list=true`, 7 players) and `online-mode=true` keep them out. **Keep the whitelist on.** Add players with `whitelist add <name>` in the console.
+- **Exposed to the internet:** port 25565 is open to the world, and random scanners do try to join (e.g. `RandomPlayer123` from `203.0.113.x`). The **whitelist** (`white-list=true`, 7 players) and `online-mode=true` keep them out. **Keep the whitelist on.** Add players with `whitelist add <name>` in the console. `enforce-whitelist` is left off on purpose (decided 2026-10-28): removing someone only takes effect when they log out, so use `kick <name>` to remove them right away.
 - **Backups:** nightly at 03:30, live, keeping up to 17 restore points (7 daily / 4 weekly / 6 monthly). Online players get a 5-min warning and a 10 s countdown. Restore with `sudo mc-backup restore` (see **3.11**).
 - **Updates:** new stable releases are **not** applied automatically. You get a 📦 push; apply with `sudo homelab-updater apply minecraft` (0 players online; friends must update their game too). See **3.10**.
 - **Auto-restart:** the watchdog (3.7) restarts Minecraft within about 15 min if the process dies. **Before stopping it on purpose,** run `touch ~/.homelab-maintenance` (remove it afterwards). Otherwise the watchdog will start it again.
@@ -535,7 +535,6 @@ Leave the policy-routing dispatcher in place unless you also remove whatever nee
 - [ ] Reserve `192.168.1.179` for this server in the router's DHCP settings.
 - [x] ~~Uptime Kuma status page `home`: add the Homarr and GolfApp monitors~~ (done 2026-10-17; all 6 monitors on the page).
 - [x] ~~Install the updated health check (GolfApp check)~~ (done 2026-10-17).
-- [ ] Optional: `enforce-whitelist=true` in Minecraft's `server.properties`, so removing someone from the whitelist also kicks them if they're online.
 - [ ] **GolfApp (friend's repo):** course details for courses other than Indian Island (only it is built in; others depend on OpenStreetMap coverage). Ask which courses the owner plays; work on a branch plus pull request (3.12).
 - [x] ~~Uptime Kuma notifications~~ (ntfy on all monitors, 2026-10-15).
 - [ ] Beszel alerts (Pi offline, high temperature, and so on). Optional, since the health check and Uptime Kuma cover most of this.

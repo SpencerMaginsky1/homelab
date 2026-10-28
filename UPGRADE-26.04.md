@@ -233,7 +233,7 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
 - [x] Update README.md: the OS in the Tailscale table (§1) and the "Last verified" line. Tick the to-do in §9. Then push the docs to GitHub: `~/Desktop/Claud/github/sync-repos.sh --push "Ubuntu 26.04 upgrade done"`.
 - [x] `sudo ufw status | grep 1022`: must print nothing (the temporary rule from step 2.4 is gone).
 - [ ] `sudo apt autoremove --purge`, after you've booted the new kernel at least once.
-- [ ] After a week with no problems, delete `~/upgrade-2604/` on the server. Keep the copy on the PC until the new drive is set up.
+- [x] (done 2026-10-27) After a week with no problems, delete `~/upgrade-2604/` on the server. Keep the copy on the PC until the new drive is set up.
 
 ---
 
