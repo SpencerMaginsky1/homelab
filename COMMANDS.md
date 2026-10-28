@@ -8,6 +8,25 @@ Quick reference for every command used to run and fix this server. *(Section num
 
 ---
 
+## Custom commands at a glance
+The homelab's own tools (everything else here is standard Linux, Docker or Tailscale). Sources are in this folder; reinstall with §14.
+
+| Command | What it does | Most used | Details |
+|---|---|---|---|
+| `homelab-healthcheck` | Checks ~35 things (containers, web UIs, timers, network, disk) and sends a report to your phone. Runs at 08:00 | `sudo homelab-healthcheck --dry-run` | §3 |
+| `homelab-watchdog` | Restarts Minecraft, Plex and containers if they go down. Runs every 15 min | `sudo homelab-watchdog --dry-run` | §4 |
+| `homelab-updater` | Backs up, updates, health-checks and auto-rolls back Homarr, Kuma, Beszel, Dawarich, Minecraft, Plex and GolfApp. Runs at 04:00 | `sudo homelab-updater status` · `apply <svc>` | §5 |
+| `homelab-rollback` | Undoes the last update of a service and holds it there | `sudo homelab-rollback <svc>` | §5 |
+| `mc-backup` | Minecraft world backups (restic) with player warnings. Runs at 03:30 | `sudo mc-backup list` · `restore latest` | §6 |
+| `duckdns-update` | Points `example.duckdns.org` at the home IP. Runs every 5 min | `sudo duckdns-update` | §8 |
+| `golf-serve` | The GolfApp web server behind `homelab-golf.service` (hides `.git`, no folder listings). Not run by hand | `systemctl status homelab-golf` | §13 |
+| `~/Desktop/Claude/github/sync-repos.sh` | Copies the docs and configs to the `homelab` (public, sanitized) and `homelab-private` GitHub repos | `… sync-repos.sh` (preview) · `--push "message"` | README (top) |
+| `~/.homelab-maintenance` | Not a command: a flag file. While it exists, the watchdog leaves things alone (auto-expires after 24 h) | `touch` / `rm` it | §2 |
+
+`<svc>` = `homarr`, `uptime-kuma`, `beszel`, `dawarich`, `minecraft`, `plex` (and `golfapp` for `apply`).
+
+---
+
 ## Contents
 1. [Is everything OK?](#1-is-everything-ok) · 2. [Planned maintenance](#2-planned-maintenance) · 3. [Daily health check](#3-daily-health-check) · 4. [Watchdog](#4-watchdog) · 5. [Updates & rollback](#5-updates--rollback) · 6. [Minecraft backups](#6-minecraft-backups) · 7. [Minecraft server](#7-minecraft-server) · 8. [DuckDNS](#8-duckdns) · 9. [Network, exit node & firewall](#9-network-exit-node--firewall) · 10. [Docker services](#10-docker-services) · 11. [Plex](#11-plex) · 12. [Notifications (ntfy)](#12-notifications-ntfy) · 13. [Docs & GolfApp web servers](#13-docs--golfapp-web-servers) · 14. [Reinstalling the homelab tools](#14-reinstalling-the-homelab-tools)
 
