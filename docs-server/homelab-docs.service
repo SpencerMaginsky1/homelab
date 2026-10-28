@@ -5,7 +5,7 @@ After=network.target
 [Service]
 User=spencer
 Group=spencer
-ExecStart=/usr/bin/python3 -m http.server 8000 --bind 127.0.0.1 --directory /home/spencer/Desktop/Claud
+ExecStart=/usr/bin/python3 -m http.server 8000 --bind 127.0.0.1 --directory /home/spencer/Desktop/Claude
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true

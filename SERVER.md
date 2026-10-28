@@ -8,7 +8,7 @@ _Last verified: 2026-10-28 01:00: fixed a VS Code Remote-SSH connection error (s
 
 ![Network diagram](network-diagram.svg)
 
-**What's in `~/Desktop/Claud`:**
+**What's in `~/Desktop/Claude`:**
 | Path | What |
 |---|---|
 | `COMMANDS.md` | Command cheat sheet: every homelab command grouped by task (health, maintenance, updates/rollback, backups/restore, Minecraft, DuckDNS, network, Docker, Plex, ntfy, the docs and GolfApp web servers). Its section numbers (§3–§9) are referenced by the diagram's Automation panel, so **if you renumber sections, update the diagram too**. |
@@ -20,7 +20,7 @@ _Last verified: 2026-10-28 01:00: fixed a VS Code Remote-SSH connection error (s
 | `mc-backup/` | Sources plus `install.sh` for the nightly Minecraft world backups (3.11). |
 | `UPGRADE-26.04.md` | The Ubuntu 25.04 → 26.04.1 LTS upgrade plan, done 2026-10-20, with notes on the kernel 7.0 SATA crash. Keep it until the kernel issue is resolved. |
 | `golf-server/` | `golf-serve` (a web server that hides `.git`), unit and `install.sh` for `homelab-golf.service`, which serves a friend's golf app from `~/Desktop/GolfApp` on port 8001 to the LAN and tailnet (3.12). |
-| `github/` | `sync-repos.sh` copies this folder, the Docker Compose files and the Minecraft start scripts to two GitHub repos: **`SpencerMaginsky1/homelab-private`** (private; the real files) and **`SpencerMaginsky1/homelab`** (public, linked on the resume; IPs, domains and names swapped for placeholders, with `PUBLIC-README.md` as its front page). It never copies `.env` files or data, blanks the Dawarich signing key, and refuses to commit if a secret or personal detail slips through. The ship tracker goes only to the private repo. After editing docs or scripts, run `~/Desktop/Claud/github/sync-repos.sh` to preview the changes, then `… --push "message"`. The working copies are in `~/repos/`. |
+| `github/` | `sync-repos.sh` copies this folder, the Docker Compose files and the Minecraft start scripts to two GitHub repos: **`SpencerMaginsky1/homelab-private`** (private; the real files) and **`SpencerMaginsky1/homelab`** (public, linked on the resume; IPs, domains and names swapped for placeholders, with `PUBLIC-README.md` as its front page). It never copies `.env` files or data, blanks the Dawarich signing key, and refuses to commit if a secret or personal detail slips through. The ship tracker goes only to the private repo. After editing docs or scripts, run `~/Desktop/Claude/github/sync-repos.sh` to preview the changes, then `… --push "message"`. The working copies are in `~/repos/`. |
 | `docs-server/` | Unit plus `install.sh` for `homelab-docs.service`, the localhost-only web server for this folder (7 → *Viewing the network diagram*). |
 
 ---
@@ -71,7 +71,7 @@ MagicDNS works: `spencer-server`, `raspberrypi` and so on resolve on any tailnet
 | **Minecraft server** | `192.168.1.179:25565` (LAN) · **`example.duckdns.org`** (internet) | Native Java in tmux session `minecraft` | `~/Desktop/MineCraft Server/` | crontab `@reboot` |
 | **GolfApp** (friend's golf web app, `a-friend/GolfApp`) | http://192.168.1.179:8001 (3.12) | systemd `homelab-golf.service` (Python `golf-serve`) | `~/Desktop/GolfApp/` (git clone) | systemd |
 | **Ship Tracker** (live AIS map of ships around NYC and Long Island) | http://192.168.1.179:8100 (3.13) | Docker (`ships`, built locally) | `~/Desktop/docker/ships/` | `restart: unless-stopped` |
-| **Docs** (this folder: README, COMMANDS, diagram) | http://localhost:8000 via SSH tunnel (7) | systemd `homelab-docs.service` (Python, localhost only) | `~/Desktop/Claud/` | systemd |
+| **Docs** (this folder: README, COMMANDS, diagram) | http://localhost:8000 via SSH tunnel (7) | systemd `homelab-docs.service` (Python, localhost only) | `~/Desktop/Claude/` | systemd |
 | **Plex** | http://192.168.1.179:32400/web | snap `plexmediaserver` | `~/Desktop/Plex_Server/` | snap service |
 | SSH | port 22 | system | | system |
 | Samba | ports 139/445 | system | | system |
@@ -115,7 +115,7 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
 - `.env` holds `SECRET_ENCRYPTION_KEY`. **Back it up together with `appdata/`.** Without it, the saved integration credentials can't be decrypted.
 - Port 7575 is published through Docker, which **bypasses ufw**. It's reachable from the LAN and tailnet, but not the internet, because the router doesn't forward it.
 
-- **"VS Code (Server)" tile** (added 2026-10-28): opens VS Code on the main PC straight into this folder over Remote-SSH. URL `vscode://vscode-remote/ssh-remote+spencer-server/home/spencer/Desktop/Claud` (the host name comes from the PC's `~/.ssh/config`; use `spencer-server-ts` for Tailscale). **Status check off**, since Homarr can't ping a `vscode://` link. It only works on a computer with VS Code and that SSH config, and does nothing on a phone. **To stop Chrome asking "Open Visual Studio Code?" each time:** Chrome only shows the "Always allow" checkbox on HTTPS pages, so it was enabled once through `chrome://flags/#unsafely-treat-insecure-origin-as-secure` (`http://192.168.1.179:7575,http://spencer-server:7575`) → relaunch → tick **Always allow** → set the flag back to **Disabled**. The choice stays saved. If Chrome starts asking again, repeat that, or set the Chrome policy `AutoLaunchProtocolsFromOrigins` = `[{"protocol":"vscode","allowed_origins":["http://192.168.1.179:7575"]}]` under `HKLM\SOFTWARE\Policies\Google\Chrome`.
+- **"VS Code (Server)" tile** (added 2026-10-28): opens VS Code on the main PC straight into this folder over Remote-SSH. URL `vscode://vscode-remote/ssh-remote+spencer-server/home/spencer/Desktop/Claude` (the host name comes from the PC's `~/.ssh/config`; use `spencer-server-ts` for Tailscale). **Status check off**, since Homarr can't ping a `vscode://` link. It only works on a computer with VS Code and that SSH config, and does nothing on a phone. **To stop Chrome asking "Open Visual Studio Code?" each time:** Chrome only shows the "Always allow" checkbox on HTTPS pages, so it was enabled once through `chrome://flags/#unsafely-treat-insecure-origin-as-secure` (`http://192.168.1.179:7575,http://spencer-server:7575`) → relaunch → tick **Always allow** → set the flag back to **Disabled**. The choice stays saved. If Chrome starts asking again, repeat that, or set the Chrome policy `AutoLaunchProtocolsFromOrigins` = `[{"protocol":"vscode","allowed_origins":["http://192.168.1.179:7575"]}]` under `HKLM\SOFTWARE\Policies\Google\Chrome`.
 
 ### 3.2 Uptime Kuma (monitoring)
 - Image `louislam/uptime-kuma:2`, `network_mode: host`, data in `./data` (SQLite).
@@ -164,7 +164,7 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
 - **Auto-restart:** the watchdog (3.7) restarts Minecraft within about 15 min if the process dies. **Before stopping it on purpose,** run `touch ~/.homelab-maintenance` (remove it afterwards). Otherwise the watchdog will start it again.
 
 ### 3.6 Daily health check (ntfy)
-- Runs **every day at 08:00 New York time** from the systemd timer `homelab-healthcheck.timer`. `Persistent=true`, so if the server was off at 8:00 it runs at the next boot. Source files are in `~/Desktop/Claud/healthcheck/`.
+- Runs **every day at 08:00 New York time** from the systemd timer `homelab-healthcheck.timer`. `Persistent=true`, so if the server was off at 8:00 it runs at the next boot. Source files are in `~/Desktop/Claude/healthcheck/`.
 - **Checks:**
   - **System:** disk usage, free RAM, load, CPU temperature, failed systemd units, SSD SMART health, recent reboot, pending updates, and **reboot required** (`/var/run/reboot-required`, with the packages that need it).
   - **Network:** Tailscale up, exit node online, public IP is the Pi's `198.51.100.20`, rules 5208/5209, IP forwarding, ICMP redirects off, ufw active, gateway NAT rule, router ping, DNS, and **`example.duckdns.org` resolves to the current home IP** (home IP looked up via `curl --interface 192.168.1.179`; the stats line shows `Home: <ip>`).
@@ -189,7 +189,7 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
   - Preview without sending: `sudo homelab-healthcheck --dry-run`
   - Next run time: `systemctl list-timers homelab-healthcheck.timer`
   - Logs: `journalctl -u homelab-healthcheck -n 50`
-- **To update after editing the source:** run `sudo bash ~/Desktop/Claud/healthcheck/install.sh`. It doesn't overwrite an existing `/etc` config.
+- **To update after editing the source:** run `sudo bash ~/Desktop/Claude/healthcheck/install.sh`. It doesn't overwrite an existing `/etc` config.
 - **If the Pi's WAN IP changes,** update `EXPECTED_EXIT_IP` in `/etc/homelab-healthcheck.conf`, and also the Uptime Kuma keyword.
 - **New Docker containers and new Uptime Kuma monitors are picked up automatically.**
 
@@ -231,10 +231,10 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
   - `/usr/local/bin/duckdns-update`
   - `/etc/duckdns.conf` (root-only, holds the **token**; treat it like a password)
   - `duckdns-update.{service,timer}`, which runs 2 min after boot and then every 5 min
-  - Sources are in `~/Desktop/Claud/duckdns/`. `install.sh` prompts for the token with hidden input.
+  - Sources are in `~/Desktop/Claude/duckdns/`. `install.sh` prompts for the token with hidden input.
 - **Logs:** run `journalctl -t duckdns`. It's quiet when nothing changes, and logs "updated …" when the home IP changes or "FAILED" on errors.
 - The **daily health check** fails if `example.duckdns.org` doesn't match the current home IP.
-- **New token** (if it ever leaks): regenerate it on duckdns.org, then run `sudo rm /etc/duckdns.conf && sudo bash ~/Desktop/Claud/duckdns/install.sh`.
+- **New token** (if it ever leaks): regenerate it on duckdns.org, then run `sudo rm /etc/duckdns.conf && sudo bash ~/Desktop/Claude/duckdns/install.sh`.
 
 ### 3.9 Plex
 - snap `plexmediaserver` (1.43.x), web UI at http://192.168.1.179:32400/web. Claimed by the Plex account.
@@ -321,7 +321,7 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
 
 ### 3.12 GolfApp (friend's golf web app)
 - **What:** Caddie Voice, a single-file web app (`index.html`) from **`a-friend/GolfApp`** on GitHub, owned by a friend. `SpencerMaginsky1` is a collaborator with push access. The friend's live copy is on Netlify; this server only runs a local copy for viewing and testing.
-- **Runs as** `homelab-golf.service`: `/usr/local/bin/golf-serve` (Python's web server, but it **never serves hidden paths like `.git` and never lists folders**) on **port 8001, all interfaces**, as `spencer`, read-only, started at boot. Sources and installer: `~/Desktop/Claud/golf-server/`.
+- **Runs as** `homelab-golf.service`: `/usr/local/bin/golf-serve` (Python's web server, but it **never serves hidden paths like `.git` and never lists folders**) on **port 8001, all interfaces**, as `spencer`, read-only, started at boot. Sources and installer: `~/Desktop/Claude/golf-server/`.
 - **Open it at** http://192.168.1.179:8001 on the home LAN (PC, phone on Wi-Fi), or http://spencer-server:8001 from any tailnet device (iPhone away from home). ufw allows 8001 **only from the LAN and tailscale0** (4.4). The router doesn't forward it, so it's **not on the internet**. Plain HTTP, so once the app gains GPS, phones will block location here (GPS needs HTTPS). Test GPS on the Netlify site, or add HTTPS on the tailnet later with `tailscale serve`.
 - **Clone:** `~/Desktop/GolfApp`, with git identity set repo-locally to the GitHub noreply address. GitHub login: `gh auth status` (account `SpencerMaginsky1`, HTTPS via the gh credential helper).
 - **Kept current automatically** by the 04:00 updater (3.10). The web server reads the files directly, so a pull is live on :8001 straight away with no restart.
@@ -445,7 +445,7 @@ Then open Homarr and check that the widgets load and everything in Uptime Kuma i
 | A service never updates any more | It's probably **on hold** after a rollback: run `sudo homelab-updater status`, then `sudo homelab-updater unhold <svc>`. |
 | Need to undo griefing, corruption or a mistake in the world | `sudo mc-backup list`, pick the last good point, then `sudo mc-backup restore <ID>`. The current world is kept as `world.before-restore-*`. |
 | 🚨 "Minecraft backup failed" | `journalctl -t mc-backup -n 30`. If it says saving wasn't confirmed, check the server is responsive (`tmux attach -t minecraft`). Saving is always switched back on. |
-| GolfApp tile in Homarr is red, but http://192.168.1.179:8001 works | The `br-homarr` ufw rule for 8001 is missing (Homarr's pings get blocked: `journalctl -k \| grep 'UFW BLOCK' \| grep 8001`). Re-run `sudo bash ~/Desktop/Claud/golf-server/install.sh`. |
+| GolfApp tile in Homarr is red, but http://192.168.1.179:8001 works | The `br-homarr` ufw rule for 8001 is missing (Homarr's pings get blocked: `journalctl -k \| grep 'UFW BLOCK' \| grep 8001`). Re-run `sudo bash ~/Desktop/Claude/golf-server/install.sh`. |
 | GolfApp doesn't show your friend's latest changes | The 04:00 pull skips the clone if it's on another branch or has uncommitted edits: `journalctl -t homelab-updater \| grep golfapp`, then `git -C ~/Desktop/GolfApp status`. Pull now with `sudo homelab-updater apply golfapp`. |
 | Daily report: "Failed systemd units: user@1000.service" | Your per-user systemd manager got stuck stopping after the last login session closed. The snap desktop helper's `xdg-document-portal` doesn't exit within Ubuntu's 5 s stop limit, so it was killed and marked failed. This happened on every logout. Fixed 2026-10-19 with `loginctl enable-linger spencer` (no sudo needed), which keeps the user manager running all the time. Check it with `loginctl show-user spencer -p Linger`. If it ever shows up again: `sudo systemctl reset-failed user@1000.service`. |
 | Kernel log shows `ata4.00: exception ... host bus error`, `failed command: WRITE FPDMA QUEUED`, or `EXT4-fs ... I/O error` | The server booted the 7.0 kernel, which has SATA errors on this board (see the Kernel row in 2). Check with `uname -r`. Go back to 6.14 straight away: `sudo grub-reboot 'Advanced options for Ubuntu>Ubuntu, with Linux 6.14.0-37-generic' && sudo reboot`. Then check `grep GRUB_DEFAULT /etc/default/grub` still names 6.14 and run `sudo update-grub`. |
@@ -463,12 +463,12 @@ sudo /etc/NetworkManager/dispatcher.d/50-policy-routing enp2s0 up
 - **Add a service to monitoring:** add an Uptime Kuma monitor (use `127.0.0.1:<port>` for local services), add it to status page `home`, and optionally add a Homarr App tile using `http://192.168.1.179:<port>`.
 - **Add another machine to Beszel:** Beszel → Add System → Binary → copy the command and run it on the machine. If you add it over Tailscale, use its `100.x` IP and port 45876.
 - **Turn the exit node off temporarily:** `sudo tailscale set --exit-node=`. Turn it back on with `sudo tailscale set --exit-node=raspberrypi --exit-node-allow-lan-access=true`.
-- **Backups worth keeping:** `~/Desktop/docker/` (all compose files, `.env` files and data dirs), `~/Desktop/MineCraft Server/world`, `/etc/ufw/before.rules`, `/etc/sysctl.d/99-gateway.conf`, `/etc/NetworkManager/dispatcher.d/50-policy-routing`, `/etc/homelab-healthcheck.conf` (holds the ntfy topic), `/etc/duckdns.conf` (holds the DuckDNS token; also keep the duckdns.org login). **`/etc/mc-backup.pass`** (the Minecraft backup password; without it the restic backups are unreadable). The Minecraft restic repository is `/var/backups/minecraft-restic`. Pre-update backups are in `/var/backups/homelab/` (last 3 per service; copy them off the machine if you want them to survive a disk failure). Sources and installers for all the homelab tools are in `~/Desktop/Claud/` (`healthcheck/`, `updater/`, `duckdns/`, `mc-backup/`, `docs-server/`, `golf-server/`). The GolfApp itself needs no backup, because GitHub has it.
+- **Backups worth keeping:** `~/Desktop/docker/` (all compose files, `.env` files and data dirs), `~/Desktop/MineCraft Server/world`, `/etc/ufw/before.rules`, `/etc/sysctl.d/99-gateway.conf`, `/etc/NetworkManager/dispatcher.d/50-policy-routing`, `/etc/homelab-healthcheck.conf` (holds the ntfy topic), `/etc/duckdns.conf` (holds the DuckDNS token; also keep the duckdns.org login). **`/etc/mc-backup.pass`** (the Minecraft backup password; without it the restic backups are unreadable). The Minecraft restic repository is `/var/backups/minecraft-restic`. Pre-update backups are in `/var/backups/homelab/` (last 3 per service; copy them off the machine if you want them to survive a disk failure). Sources and installers for all the homelab tools are in `~/Desktop/Claude/` (`healthcheck/`, `updater/`, `duckdns/`, `mc-backup/`, `docs-server/`, `golf-server/`). The GolfApp itself needs no backup, because GitHub has it.
 - **Planned maintenance (stopping Minecraft or Plex on purpose):** run `touch ~/.homelab-maintenance` first, do the work, then `rm ~/.homelab-maintenance`.
 - **Change the Minecraft RAM:** edit `-Xms`/`-Xmx` in `~/Desktop/MineCraft Server/start.sh` (currently 6G). Then, with no players online, run `stop` in the tmux console and start `./start.sh` again in the same session.
 
 ### Working on the server from the main PC (VS Code Remote-SSH, set up 2026-10-27)
-The Windows main PC edits this server with VS Code's **Remote - SSH** extension, and the Claude Code extension runs on the server in `~/Desktop/Claud`, so it uses this folder's project memory. Login is with the PC's ed25519 key, which is in `~/.ssh/authorized_keys`, so no password is needed.
+The Windows main PC edits this server with VS Code's **Remote - SSH** extension, and the Claude Code extension runs on the server in `~/Desktop/Claude`, so it uses this folder's project memory. Login is with the PC's ed25519 key, which is in `~/.ssh/authorized_keys`, so no password is needed.
 
 **First-time setup on a Windows PC** (to redo it on a new PC):
 1. Install **VS Code**, then in Extensions install **Remote - SSH** (Microsoft) and **Claude Code** (Anthropic).
@@ -477,7 +477,7 @@ The Windows main PC edits this server with VS Code's **Remote - SSH** extension,
    `type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh spencer@192.168.1.179 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"`
 4. Create `C:\Users\<user>\.ssh\config` with the two hosts below. Test with `ssh spencer-server`: it should log in without a password.
 5. In VS Code: F1 → **Remote-SSH: Connect to Host…** → `spencer-server` → platform **Linux**. The first connect installs the VS Code server in `~/.vscode-server` (about 1 GB on disk).
-6. File → Open Folder → `/home/spencer/Desktop/Claud`. Claude Code then installs into the remote window on its own. If it doesn't, go to Extensions → Claude Code → **Install in SSH: spencer-server**. Sign in to Claude when it asks.
+6. File → Open Folder → `/home/spencer/Desktop/Claude`. Claude Code then installs into the remote window on its own. If it doesn't, go to Extensions → Claude Code → **Install in SSH: spencer-server**. Sign in to Claude when it asks.
 7. Optional: Settings → **Disable AI Features** (turns off the built-in Copilot, about 230 MB less RAM on the server; see below).
 8. Save the workspace to the PC's desktop for one-click opening (see "One-click open" below).
 
@@ -490,7 +490,7 @@ The Windows main PC edits this server with VS Code's **Remote - SSH** extension,
       HostName 100.64.0.10
       User spencer
   ```
-- **One-click open:** a `.code-workspace` file saved on the PC's desktop (File → Save Workspace As… → **Show Local**). It stores the `spencer-server` host and the `/home/spencer/Desktop/Claud` folder, so the server needs no copy of it. File → Open Recent works too, as long as you pick the entry with the folder in it, not the bare host.
+- **One-click open:** a `.code-workspace` file saved on the PC's desktop (File → Save Workspace As… → **Show Local**). It stores the `spencer-server` host and the `/home/spencer/Desktop/Claude` folder, so the server needs no copy of it. File → Open Recent works too, as long as you pick the entry with the folder in it, not the bare host.
 - **Check which path a session uses:** `echo $SSH_CONNECTION` in the VS Code terminal. It shows `192.168.1.x` on the LAN and `100.x` on Tailscale.
 - If the LAN IP ever changes, update `HostName` (see the DHCP reservation to-do in 9).
 - **RAM use while connected:** about **2 GB** in total, so Beszel shows a jump when the window opens. VS Code's server is about 1.1 GB and Claude Code about 1.2 GB. This is normal, and about 4.5 GB stays available with Minecraft's 6 GB reserved. The VS Code server **keeps running for up to 3 hours after you disconnect** (in case you reconnect). To free it right away, run **Remote-SSH: Kill VS Code Server on Host**, which also ends any Claude Code chat open in VS Code.
@@ -508,7 +508,7 @@ The Windows main PC edits this server with VS Code's **Remote - SSH** extension,
    Then browse to **http://localhost:8000/network-diagram.svg**. `http://localhost:8000/` lists the folder.
 3. **Closing the tunnel** (closing that terminal or typing `exit`) only closes the tunnel; the web server keeps running.
 4. **Turn it off for good:** `sudo systemctl disable --now homelab-docs`. Turn it back on with `sudo systemctl enable --now homelab-docs`.
-5. **Install or reinstall:** `sudo bash ~/Desktop/Claud/docs-server/install.sh` (it also stops any old hand-started `nohup` copy).
+5. **Install or reinstall:** `sudo bash ~/Desktop/Claude/docs-server/install.sh` (it also stops any old hand-started `nohup` copy).
 6. **"Connection refused" through the tunnel** means nothing is listening on port 8000 on the server. Check `systemctl status homelab-docs` and `journalctl -u homelab-docs -n 20`.
 
 **Run the tunnel command on the PC**, not inside an SSH session on the server; otherwise the server tunnels to itself and the browser says "refused". (The GolfApp on 8001 doesn't need a tunnel: it's open to the LAN and tailnet, see 3.12.)

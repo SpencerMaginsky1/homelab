@@ -257,7 +257,7 @@
 
   <!-- documentation -->
   <rect x="310" y="977" width="460" height="104" rx="10" fill="#1e2530" stroke="#a5d8ff" stroke-width="1.5" stroke-dasharray="5 3"/>
-  <text x="328" y="1000" class="t" font-weight="700" fill="#a5d8ff">DOCUMENTATION · ~/Desktop/Claud</text>
+  <text x="328" y="1000" class="t" font-weight="700" fill="#a5d8ff">DOCUMENTATION · ~/Desktop/Claude</text>
   <text x="328" y="1020" class="s"><tspan font-weight="700" fill="#e9ecef">COMMANDS.md</tspan> - command cheat sheet by task: health, maintenance,</text>
   <text x="328" y="1035" class="s">      updates/rollback, backups/restore, Minecraft, DuckDNS, network</text>
   <text x="328" y="1053" class="s"><tspan font-weight="700" fill="#e9ecef">README.md</tspan> - how everything works and why (also Claude's 08:00 context)</text>

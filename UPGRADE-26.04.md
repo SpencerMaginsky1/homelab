@@ -89,7 +89,7 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
   ```powershell
   mkdir "$HOME\server-backup-2604"
   scp spencer@192.168.1.179:~/upgrade-2604/*.tgz "$HOME\server-backup-2604"
-  scp -r spencer@192.168.1.179:/home/spencer/Desktop/Claud "$HOME\server-backup-2604"
+  scp -r spencer@192.168.1.179:/home/spencer/Desktop/Claude "$HOME\server-backup-2604"
   ```
   Keep the quotes and leave off the trailing `\`: the Windows user folder has a space in it, which otherwise breaks scp's path.
   The `*.tgz` includes `mc-restic.tgz`, the Minecraft restic repository (about 1.3 GB, made in step 1.3). The world itself is in there.
@@ -230,7 +230,7 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
 
 ## 5. Clean up and record
 
-- [x] Update README.md: the OS in the Tailscale table (§1) and the "Last verified" line. Tick the to-do in §9. Then push the docs to GitHub: `~/Desktop/Claud/github/sync-repos.sh --push "Ubuntu 26.04 upgrade done"`.
+- [x] Update README.md: the OS in the Tailscale table (§1) and the "Last verified" line. Tick the to-do in §9. Then push the docs to GitHub: `~/Desktop/Claude/github/sync-repos.sh --push "Ubuntu 26.04 upgrade done"`.
 - [x] `sudo ufw status | grep 1022`: must print nothing (the temporary rule from step 2.4 is gone).
 - [ ] `sudo apt autoremove --purge`, after you've booted the new kernel at least once.
 - [x] (done 2026-10-27) After a week with no problems, delete `~/upgrade-2604/` on the server. Keep the copy on the PC until the new drive is set up.
@@ -249,4 +249,4 @@ Written 2026-10-16, updated 2026-10-20 to be done **over SSH from the main PC** 
 | SSH drops during the upgrade | Reconnect (`ssh spencer@192.168.1.179`, or `-p 1022`) and `tmux attach -t upgrade`. If `tmux` says there's no session and the upgrade isn't running (`pgrep -a do-release`), see "The upgrade stops with an error partway". |
 | A Docker container won't start | `docker logs <name>`. If the data is the problem, stop the stack and restore from `docker-dirs.tgz` / `docker-volumes.tgz`. |
 | Minecraft won't start | `tmux attach -t minecraft` and read the error. Check `java -version`. If OpenJDK 25 was removed: `sudo apt install openjdk-25-jre-headless`. |
-| Badly broken | Do a clean install of 26.04, then restore `/etc` pieces from `etc.tgz` (not the whole of `/etc`), Docker data from the tarballs, Minecraft from restic, and re-run each `install.sh` in `~/Desktop/Claud`. README.md is the rebuild guide. |
+| Badly broken | Do a clean install of 26.04, then restore `/etc` pieces from `etc.tgz` (not the whole of `/etc`), Docker data from the tarballs, Minecraft from restic, and re-run each `install.sh` in `~/Desktop/Claude`. README.md is the rebuild guide. |

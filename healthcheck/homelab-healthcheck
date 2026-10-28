@@ -18,7 +18,7 @@ CONF=/etc/homelab-healthcheck.conf
 : "${SYS_DISK:=/dev/disk/by-id/ata-PNY_CS900_500GB_SSD_SERIAL123456}"
 : "${CLAUDE_USER:=spencer}"
 : "${CLAUDE_BIN:=/home/spencer/.local/bin/claude}"
-: "${README:=/home/spencer/Desktop/Claud/README.md}"
+: "${README:=/home/spencer/Desktop/Claude/README.md}"
 : "${DUCKDNS_HOST:=example.duckdns.org}"
 DRY_RUN=0; [[ ${1:-} == --dry-run ]] && DRY_RUN=1
 
