@@ -468,6 +468,17 @@ sudo /etc/NetworkManager/dispatcher.d/50-policy-routing enp2s0 up
 ### Working on the server from the main PC (VS Code Remote-SSH, set up 2026-10-27)
 The Windows main PC edits this server with VS Code's **Remote - SSH** extension, and the Claude Code extension runs on the server in `~/Desktop/Claud`, so it uses this folder's project memory. Login is with the PC's ed25519 key, which is in `~/.ssh/authorized_keys`, so no password is needed.
 
+**First-time setup on a Windows PC** (to redo it on a new PC):
+1. Install **VS Code**, then in Extensions install **Remote - SSH** (Microsoft) and **Claude Code** (Anthropic).
+2. Make an SSH key in PowerShell: `ssh-keygen -t ed25519` (press Enter for the defaults). It creates `C:\Users\<user>\.ssh\id_ed25519` and `.pub`.
+3. Copy the public key to the server (one password prompt):
+   `type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh spencer@192.168.1.179 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"`
+4. Create `C:\Users\<user>\.ssh\config` with the two hosts below. Test with `ssh spencer-server`: it should log in without a password.
+5. In VS Code: F1 → **Remote-SSH: Connect to Host…** → `spencer-server` → platform **Linux**. The first connect installs the VS Code server in `~/.vscode-server` (about 1 GB on disk).
+6. File → Open Folder → `/home/spencer/Desktop/Claud`. Claude Code then installs into the remote window on its own. If it doesn't, go to Extensions → Claude Code → **Install in SSH: spencer-server**. Sign in to Claude when it asks.
+7. Optional: Settings → **Disable AI Features** (turns off the built-in Copilot, about 230 MB less RAM on the server; see below).
+8. Save the workspace to the PC's desktop for one-click opening (see "One-click open" below).
+
 - **PC `~/.ssh/config`** (`C:\Users\<user>\.ssh\config`):
   ```
   Host spencer-server          # LAN, the normal one at home
