@@ -45,7 +45,7 @@ All of these are bash scripts with systemd timers, each with its own `install.sh
 
 ## Tech
 
-Ubuntu Linux · Docker Compose · systemd services and timers · Bash · Python · Tailscale · ufw/iptables policy routing · restic · ntfy · Uptime Kuma · PostgreSQL/PostGIS
+Ubuntu Linux · VS Code Remote-SSH + Claude Code · Docker Compose · systemd services and timers · Bash · Python · Tailscale · ufw/iptables policy routing · restic · ntfy · Uptime Kuma · PostgreSQL/PostGIS
 
 ## Note
 
