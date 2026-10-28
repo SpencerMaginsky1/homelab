@@ -115,6 +115,8 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
 - `.env` holds `SECRET_ENCRYPTION_KEY`. **Back it up together with `appdata/`.** Without it, the saved integration credentials can't be decrypted.
 - Port 7575 is published through Docker, which **bypasses ufw**. It's reachable from the LAN and tailnet, but not the internet, because the router doesn't forward it.
 
+- **"VS Code (Server)" tile** (added 2026-10-28): opens VS Code on the main PC straight into this folder over Remote-SSH. URL `vscode://vscode-remote/ssh-remote+spencer-server/home/spencer/Desktop/Claud` (the host name comes from the PC's `~/.ssh/config`; use `spencer-server-ts` for Tailscale). **Status check off**, since Homarr can't ping a `vscode://` link. It only works on a computer with VS Code and that SSH config, and does nothing on a phone. **To stop Chrome asking "Open Visual Studio Code?" each time:** Chrome only shows the "Always allow" checkbox on HTTPS pages, so it was enabled once through `chrome://flags/#unsafely-treat-insecure-origin-as-secure` (`http://192.168.1.179:7575,http://spencer-server:7575`) → relaunch → tick **Always allow** → set the flag back to **Disabled**. The choice stays saved. If Chrome starts asking again, repeat that, or set the Chrome policy `AutoLaunchProtocolsFromOrigins` = `[{"protocol":"vscode","allowed_origins":["http://192.168.1.179:7575"]}]` under `HKLM\SOFTWARE\Policies\Google\Chrome`.
+
 ### 3.2 Uptime Kuma (monitoring)
 - Image `louislam/uptime-kuma:2`, `network_mode: host`, data in `./data` (SQLite).
 - Current monitors:
