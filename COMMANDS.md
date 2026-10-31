@@ -90,7 +90,7 @@ sudo cat /var/lib/homelab-updater/history.log       # what the 8 AM report reads
 sudo ls /var/backups/homelab/<svc>/                 # pre-update backups (last 3; Minecraft last 2)
 ```
 - **Auto:** Homarr, Uptime Kuma, Beszel.
-- **Ask first (📦 push):** Minecraft, Dawarich.
+- **Ask first (📦 push):** Minecraft, Dawarich. First push when it appears, then a low-priority "Still waiting" reminder each day at 04:00 until applied.
 - **Plex:** snap updates itself. `sudo homelab-rollback plex` = `snap revert` + hold.
 - **GolfApp:** fast-forward `git pull` of `main` from GitHub (skipped if the clone is on another branch or has edits). `sudo homelab-updater apply golfapp` pulls now. No rollback: GitHub is the source of truth.
 

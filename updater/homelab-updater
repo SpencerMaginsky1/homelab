@@ -74,7 +74,7 @@ CHANGES=()
 stack_check() {  # pulls; fills CHANGES with "svc: old -> new"; returns 0 if an update is available
   local s=$1 c svc ref cur new
   CHANGES=()
-  compose "$s" pull -q >/dev/null 2>&1 || { log "pull failed for $s"; return 1; }
+  compose "$s" pull -q >/dev/null 2>&1 || { log "pull failed for $s"; return 2; }
   for c in $(compose "$s" ps -a -q); do
     svc=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$c")
     ref=$(docker inspect -f '{{.Config.Image}}' "$c"); cur=$(docker inspect -f '{{.Image}}' "$c")
@@ -320,28 +320,37 @@ $("${g[@]}" log --format='- %s' "$old..$new" | head -10)"
 }
 
 # =====================================================================  commands
-notify_available() {  # svc details...
-  local s=$1 key; shift; key=$(printf '%s' "$*" | md5sum | cut -c1-12)
-  [[ $(cat "$STATE/$s.notified" 2>/dev/null) == "$key" ]] && return   # already told you about this one
+notify_available() {  # svc details...  (first time: normal push; every later day it's still pending: quiet reminder)
+  local s=$1 key since; shift; key=$(printf '%s' "$*" | md5sum | cut -c1-12)
+  if [[ $(head -1 "$STATE/$s.notified" 2>/dev/null) == "$key" ]]; then
+    since=$(sed -n 2p "$STATE/$s.notified"); since=$(date -d "@${since:-$(stat -c %Y "$STATE/$s.notified")}" '+%b %-d')
+    log "STILL AVAILABLE $s (since $since)"
+    notify "📦 Still waiting: $s" 2 package "$*
+Available since $since. To update (with backup + auto-rollback): sudo homelab-updater apply $s"
+    return
+  fi
   log "AVAILABLE $s: $*"
   notify "📦 Update available: $s" 3 package "$*
 Not applied automatically. To update (with backup + auto-rollback): sudo homelab-updater apply $s"
-  echo "$key" > "$STATE/$s.notified"
+  printf '%s\n%s\n' "$key" "$(date +%s)" > "$STATE/$s.notified"
 }
 
 daily() {
-  local s
+  local s rc
   for s in "${DOCKER_STACKS[@]}"; do
     if [[ -e $STATE/$s.hold ]]; then log "HELD $s (rolled back earlier; 'unhold' to resume)"; continue; fi
-    stack_check "$s" || continue
+    stack_check "$s"; rc=$?
+    (( rc == 1 )) && rm -f "$STATE/$s.notified"   # up to date (e.g. updated by hand): stop the morning report nagging
+    (( rc == 0 )) || continue
     if [[ ${POLICY[$s]} == auto ]]; then stack_apply "$s"
     else notify_available "$s" "$(printf '%s\n' "${CHANGES[@]}")"; fi
   done
   if [[ -e $STATE/minecraft.hold ]]; then log "HELD minecraft"
   else
     local cur new; cur=$(mc_current); new=$(mc_latest)
-    [[ -n $new && $cur != "$new" ]] && notify_available minecraft "Minecraft $cur → $new (stable release).
+    if [[ -n $new && $cur != "$new" ]]; then notify_available minecraft "Minecraft $cur → $new (stable release).
 Players will need to update their game to $new too."
+    elif [[ -n $new ]]; then rm -f "$STATE/minecraft.notified"; fi
   fi
   plex_check
   for s in "${!REPO[@]}"; do git_pull "$s"; done
