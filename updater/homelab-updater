@@ -12,6 +12,8 @@
 #   homelab-rollback <svc>          same as "homelab-updater rollback <svc>"
 #
 # Services: homarr, uptime-kuma, beszel (auto) · dawarich, minecraft (ask) · plex (snap auto-updates itself)
+#           dawarich: patch releases (1.19.0 → 1.19.1) and redis/postgis rebuilds are applied automatically;
+#           minor/major releases ask. Every Dawarich update takes a pg_dump first and rolls back if points go missing.
 #           golfapp (git: fast-forward pull of main from GitHub, as $REPO_USER; never overwrites local work)
 # Backups:  /var/backups/homelab/<svc>/<YYYYmmdd-HHMMSS>/  (last 3 kept; Minecraft last 2)
 set -uo pipefail
@@ -128,8 +130,25 @@ prune() {  # svc keep
   done
 }
 
+dw_points() {  # Dawarich location point count (empty if the DB can't be read)
+  docker exec dawarich_db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from points"' 2>/dev/null | grep -E '^[0-9]+$'
+}
+dw_dump() {  # file: pg_dump of the Dawarich DB (custom format: pg_restore -d ... file)
+  docker exec dawarich_db sh -c 'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' > "$1" 2>/dev/null && [[ -s $1 ]]
+}
+low_risk() {  # svc: 0 if every pending change (in CHANGES) is safe to apply without asking
+  local s=$1 line from to
+  [[ $s == dawarich ]] || return 1
+  for line in "${CHANGES[@]}"; do
+    [[ ${line%%:*} == dawarich_app ]] || continue   # redis/postgis tags are pinned in compose, so a change is a same-version rebuild
+    from=$(grep -oP '^[^:]+: \K[0-9]+\.[0-9]+(?=\.[0-9]+ → )' <<<"$line")
+    to=$(grep -oP ' → \K[0-9]+\.[0-9]+(?=\.[0-9]+$)' <<<"$line")
+    [[ -n $from && $from == "$to" ]] || return 1    # minor/major release, or a version we can't read: ask
+  done
+}
+
 stack_apply() {  # svc [force]
-  local s=$1 force=${2:-} ts d c svc ref cur tag summary
+  local s=$1 force=${2:-} ts d c svc ref cur tag summary pts_before pts_after
   if ! stack_check "$s" && [[ -z $force ]]; then log "$s is up to date"; return 0; fi
   summary=$(printf '%s\n' "${CHANGES[@]:-(forced, same version)}")
   ts=$(date +%Y%m%d-%H%M%S); d="$BACKUP_ROOT/$s/$ts"; mkdir -p "$d"
@@ -142,6 +161,14 @@ stack_apply() {  # svc [force]
   done
   cp -p "${DIR[$s]}"/*compose*.y*ml "$d/" 2>/dev/null
   log "UPDATING $s (backup $ts): $(tr '\n' ';' <<<"$summary")"
+  if [[ $s == dawarich ]]; then                               # location data: SQL dump + point count before touching anything
+    pts_before=$(dw_points)
+    if [[ -z $pts_before ]] || ! dw_dump "$d/dawarich.dump"; then
+      log "FAILED $s: database dump failed - not updating"
+      notify "🚨 $s update aborted" 5 rotating_light "Couldn't dump the Dawarich database first, so nothing was changed."
+      finish; return 1
+    fi
+  fi
   compose "$s" stop >/dev/null 2>&1
   if ! data_backup "$s" "$d"; then
     log "FAILED $s: backup failed - not updating"; compose "$s" up -d >/dev/null 2>&1
@@ -150,8 +177,17 @@ stack_apply() {  # svc [force]
   fi
   compose "$s" up -d >/dev/null 2>&1
   if wait_healthy "$s" 300; then
+    if [[ $s == dawarich ]]; then
+      pts_after=$(dw_points)
+      if [[ -z $pts_after ]] || (( pts_after < pts_before )); then
+        log "FAILED $s: location points ${pts_before} → ${pts_after:-?} after update - rolling back"
+        stack_rollback "$s" "$ts" "location points went from $pts_before to ${pts_after:-unreadable} after the update"
+        finish; return 1
+      fi
+      summary+=$'\n'"Location points: $pts_before → $pts_after (none lost). SQL dump kept in backup $ts."
+    fi
     log "UPDATED $s: $(tr '\n' ';' <<<"$summary")"
-    notify "🆙 Updated $s" 3 arrow_up "$summary
+    notify "🆙 Updated $s${auto_reason:+ (automatic: $auto_reason)}" 3 arrow_up "$summary
 Healthy after update. Undo: sudo homelab-rollback $s"
     rm -f "$STATE/$s.notified"; prune "$s" "$KEEP"
   else
@@ -343,6 +379,7 @@ daily() {
     (( rc == 1 )) && rm -f "$STATE/$s.notified"   # up to date (e.g. updated by hand): stop the morning report nagging
     (( rc == 0 )) || continue
     if [[ ${POLICY[$s]} == auto ]]; then stack_apply "$s"
+    elif low_risk "$s"; then auto_reason="low-risk: patch release or image rebuild" stack_apply "$s"
     else notify_available "$s" "$(printf '%s\n' "${CHANGES[@]}")"; fi
   done
   if [[ -e $STATE/minecraft.hold ]]; then log "HELD minecraft"
