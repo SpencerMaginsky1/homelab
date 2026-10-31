@@ -16,4 +16,23 @@ services:
       - ./appdata:/appdata
     environment:
       SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY}   # set in .env; keep it with appdata backups
+      DOCKER_HOSTNAMES: docker-proxy                    # Docker Containers widget, via the read-only proxy below
+      DOCKER_PORTS: '2375'
+    depends_on:
+      - docker-proxy
+    restart: unless-stopped
+
+  # Read-only Docker API for Homarr: list/inspect containers only, no start/stop/exec.
+  # Not published on the host; only reachable on br-homarr.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: docker-proxy
+    networks:
+      - homarr
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      CONTAINERS: 1
+      INFO: 1
+      POST: 0
     restart: unless-stopped
