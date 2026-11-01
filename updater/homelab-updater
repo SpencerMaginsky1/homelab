@@ -74,15 +74,21 @@ img_ver() {  # human version for an image id/ref
 # =====================================================================  Docker stacks
 CHANGES=()
 stack_check() {  # pulls; fills CHANGES with "svc: old -> new"; returns 0 if an update is available
-  local s=$1 c svc ref cur new
+  local s=$1 c svc ref cur new cur_m new_m plat
   CHANGES=()
+  plat=$(docker version -f '{{.Server.Os}}/{{.Server.Arch}}' 2>/dev/null)
   [[ -t 1 ]] && echo "checking/downloading images for $s (Dawarich can take several minutes)..."
   (cd "${DIR[$s]}" && timeout 1800 docker compose pull -q) >/dev/null 2>&1 || { log "pull failed for $s"; return 2; }   # 30 min: Dawarich is ~800 MB
   for c in $(compose "$s" ps -a -q); do
     svc=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$c")
     ref=$(docker inspect -f '{{.Config.Image}}' "$c"); cur=$(docker inspect -f '{{.Image}}' "$c")
     new=$(docker image inspect -f '{{.Id}}' "$ref" 2>/dev/null)
-    [[ -n $new && $new != "$cur" ]] && CHANGES+=("$svc: $(img_ver "$cur") → $(img_ver "$new")")
+    # Compare this machine's build, not the multi-arch index: a rebuild that only touched other
+    # platforms changes the index id but not what runs here (compose rightly won't recreate it).
+    cur_m=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.image"}}' "$c")
+    new_m=$(docker image inspect --platform "$plat" -f '{{.Id}}' "$ref" 2>/dev/null)
+    [[ -n $cur_m && -n $new_m ]] || { cur_m=$cur; new_m=$new; }   # not made by compose / old store: fall back to image ids
+    [[ -n $new && $new_m != "$cur_m" ]] && CHANGES+=("$svc: $(img_ver "$cur") → $(img_ver "$new")")
   done
   (( ${#CHANGES[@]} ))
 }
