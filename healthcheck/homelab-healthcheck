@@ -151,7 +151,8 @@ http_ok http://127.0.0.1:8001/ || warn "GolfApp not responding on :8001 (systemc
 systemctl is-active -q snap.plexmediaserver.plexmediaserver || fail "Plex service is not active"
 
 runuser -u spencer -- tmux has-session -t minecraft 2>/dev/null || fail "Minecraft tmux session is missing"
-timeout 5 bash -c '</dev/tcp/127.0.0.1/25565' 2>/dev/null       && ok "Minecraft up" || fail "Minecraft not accepting connections on :25565"
+mc_up=0; timeout 5 bash -c '</dev/tcp/127.0.0.1/25565' 2>/dev/null && mc_up=1
+(( mc_up )) && ok "Minecraft up" || fail "Minecraft not accepting connections on :25565"
 
 kuma_down=$(docker exec uptime-kuma sqlite3 -readonly /app/data/kuma.db \
   "select m.name from monitor m join heartbeat h on h.id=(select max(id) from heartbeat where monitor_id=m.id)
@@ -186,7 +187,7 @@ up_wait=$(ls "$UPD_STATE"/*.notified 2>/dev/null | xargs -rn1 basename | sed 's/
 up_held=$(ls "$UPD_STATE"/*.hold 2>/dev/null | xargs -rn1 basename | sed 's/\.hold$//' | paste -sd, -)
 [[ -n $up_done ]] && ok "Updated in last 24h: $up_done"
 [[ -n $up_fail ]] && fail "Update/rollback FAILED in last 24h: $up_fail (journalctl -t homelab-updater)"
-[[ -n $up_wait ]] && warn "Updates waiting for your approval: $up_wait (sudo homelab-updater apply <name>)"
+[[ -n $up_wait ]] && warn "Update waiting for your OK: $up_wait (run: sudo homelab-updater apply ${up_wait//,/ ; sudo homelab-updater apply })"
 [[ -n $up_held ]] && warn "Updates on hold after a rollback: $up_held (sudo homelab-updater unhold <name>)"
 up_pull=$(grep -oP '^PULL FAILED \K[^: ]+' <<<"$up_log" | sort -u | paste -sd, -)
 [[ -n $up_pull ]] && warn "GitHub pull failed in last 24h: $up_pull (journalctl -t homelab-updater)"
@@ -199,6 +200,26 @@ Exit: ${pub_ip:-?} · Home: ${home_ip:-?} · ${running:-?}/${total:-?} container
 Uptime ${uptime_h} · ${updates} package updates available${up_done:+ · updated: $up_done}
 MC backup: ${mcb_age_h:-?}h ago · ${mcb_sum:-no data}"
 
+# Phone-friendly version of the same numbers (the raw $stats above is what Claude reads)
+plural() { (( $1 == 1 )) && echo "$1 $2" || echo "$1 ${2}s"; }
+if (( up_s >= 86400 )); then up_human=$(plural $(( up_s / 86400 )) day); else up_human=$(plural $(( up_s / 3600 )) hour); fi
+cpu_busy=$(awk "BEGIN{printf \"%d\", $load15 / $(nproc) * 100}")
+if   [[ -z $pub_ip ]];                    then net="❌ offline"
+elif [[ $pub_ip == "$EXPECTED_EXIT_IP" ]]; then net="online, going through the Pi"
+else                                           net="online, but NOT through the Pi"; fi
+if   [[ -n $dd_ip && $dd_ip == "${home_ip:-}" ]]; then net+=", Minecraft address correct"
+else net+=", Minecraft address needs checking"; fi
+kuma_down_n=$(awk -F, 'NF {print NF}' <<<"${kuma_down:-}"); kuma_up=$(( ${kuma_total:-0} - ${kuma_down_n:-0} ))
+mc_snaps=$(grep -oP 'snapshots=\K\S+' <<<"${mcb_sum:-}"); mc_size=$(grep -oP 'size=\K\S+' <<<"${mcb_sum:-}")
+if [[ -n ${mcb_age_h:-} ]]; then mc_bk="Minecraft world saved $(plural "$mcb_age_h" hour) ago${mc_snaps:+ ($mc_snaps snapshots, ${mc_size/G/ GB})}"
+else mc_bk="no Minecraft backup found"; fi
+pretty="🖥️ Server: up $up_human · disk ${disk_pct}% full · $(awk "BEGIN{printf \"%.1f\", $mem_avail_mb/1024}") GB RAM free · CPU ${cpu_temp}°C, ${cpu_busy}% busy
+🌐 Internet: $net
+🧩 Apps: ${running:-?} of ${total:-?} containers running · ${kuma_up} of ${kuma_total:-?} Uptime Kuma checks up · Minecraft $( (( mc_up )) && echo up || echo DOWN)
+💾 Backups: $mc_bk
+🆙 Updated overnight: ${up_done:-nothing needed}
+📦 Ubuntu: $( (( updates )) && echo "$(plural "$updates" "package update") available" || echo "up to date")"
+
 report="Host: $host  Time: $(date '+%F %R %Z')
 FAILURES (${n_fail}):
 $(list "${FAILS[@]}")
@@ -209,12 +230,17 @@ STATS:
 $stats"
 
 if (( n_fail == 0 && n_warn == 0 )); then
-  title="✅ $host: all checks passed"; prio=3; tags=white_check_mark
-  body="$stats"
+  title="✅ $host: all good"; prio=3; tags=white_check_mark
+  body="Everything is running normally.
+
+$pretty"
 else
-  if (( n_fail )); then title="🚨 $host: $n_fail problem(s), $n_warn warning(s)"; prio=5; tags=rotating_light
-  else title="⚠️ $host: $n_warn warning(s)"; prio=4; tags=warning; fi
-  issues=$(printf '• %s\n' "${FAILS[@]}" "${WARNS[@]}" | grep -v '^• $')
+  if (( n_fail )); then title="🚨 $host: $(plural "$n_fail" problem)$( (( n_warn )) && echo ", $(plural "$n_warn" warning)")"; prio=5; tags=rotating_light
+  else title="⚠️ $host: $(plural "$n_warn" thing) to look at"; prio=4; tags=warning; fi
+  issues=""
+  (( n_fail )) && issues+="Needs fixing:"$'\n'"$(printf '• %s\n' "${FAILS[@]}")"$'\n'
+  (( n_warn )) && issues+="Heads up:"$'\n'"$(printf '• %s\n' "${WARNS[@]}")"
+  issues=${issues%$'\n'}
   summary=""
   if [[ -x $CLAUDE_BIN ]]; then
     summary=$(cd /tmp && { printf '%s\n' "$report"; [[ -r $README ]] && printf '\n===== README (how this server is set up) =====\n' && cat "$README"; } | timeout 180 runuser -u "$CLAUDE_USER" -- \
@@ -226,17 +252,17 @@ Context: Ubuntu server 'Spencer-Server' (LAN 192.168.1.179) routes all traffic t
 (Homarr, Uptime Kuma, Beszel, Dawarich), plus a friend's golf web app (homelab-golf, port 8001). The health report comes first on stdin, then the server's README.
 Base every fix on how the README says this server is set up (e.g. NAT lives in /etc/ufw/before.rules,
 routing rules come from the NetworkManager dispatcher script) - never suggest generic alternatives
-like iptables-persistent. Write at most 5 short lines, plain text, no markdown: what is wrong, the likely
-cause, and the first command or step to fix it. Do not repeat the passed checks." 2>/dev/null | head -c 1500)
+like iptables-persistent. Write at most 5 short lines, plain text, no markdown, in plain English a non-expert can follow:
+what is wrong, the likely cause, and the first command or step to fix it. Do not repeat the passed
+checks or list the problems again (they are shown under your text)." 2>/dev/null | head -c 1500)
   fi
   if [[ -n $summary ]]; then body="$summary
 
-Details:
 $issues"
   else body="$issues"; fi
   body="$body
 
-$stats"
+$pretty"
 fi
 
 if (( DRY_RUN )); then
