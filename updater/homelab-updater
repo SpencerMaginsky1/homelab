@@ -76,7 +76,8 @@ CHANGES=()
 stack_check() {  # pulls; fills CHANGES with "svc: old -> new"; returns 0 if an update is available
   local s=$1 c svc ref cur new
   CHANGES=()
-  compose "$s" pull -q >/dev/null 2>&1 || { log "pull failed for $s"; return 2; }
+  [[ -t 1 ]] && echo "checking/downloading images for $s (Dawarich can take several minutes)..."
+  (cd "${DIR[$s]}" && timeout 1800 docker compose pull -q) >/dev/null 2>&1 || { log "pull failed for $s"; return 2; }   # 30 min: Dawarich is ~800 MB
   for c in $(compose "$s" ps -a -q); do
     svc=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$c")
     ref=$(docker inspect -f '{{.Config.Image}}' "$c"); cur=$(docker inspect -f '{{.Image}}' "$c")
@@ -149,7 +150,9 @@ low_risk() {  # svc: 0 if every pending change (in CHANGES) is safe to apply wit
 
 stack_apply() {  # svc [force]
   local s=$1 force=${2:-} ts d c svc ref cur tag summary pts_before pts_after
-  if ! stack_check "$s" && [[ -z $force ]]; then log "$s is up to date"; return 0; fi
+  local rc; stack_check "$s"; rc=$?
+  if (( rc == 2 )); then echo "couldn't download the new images for $s (network/registry problem or interrupted); nothing was changed"; return 1; fi
+  if (( rc == 1 )) && [[ -z $force ]]; then log "$s is up to date"; return 0; fi
   summary=$(printf '%s\n' "${CHANGES[@]:-(forced, same version)}")
   ts=$(date +%Y%m%d-%H%M%S); d="$BACKUP_ROOT/$s/$ts"; mkdir -p "$d"
   begin
@@ -413,7 +416,10 @@ case ${1:-daily} in
   daily) daily ;;
   check)
     for s in "${DOCKER_STACKS[@]}"; do
-      if stack_check "$s"; then printf '%s: UPDATE AVAILABLE\n%s\n' "$s" "$(printf '  %s\n' "${CHANGES[@]}")"; else echo "$s: up to date"; fi
+      stack_check "$s"; case $? in
+        0) printf '%s: UPDATE AVAILABLE\n%s\n' "$s" "$(printf '  %s\n' "${CHANGES[@]}")" ;;
+        2) echo "$s: couldn't download images (check again later)" ;;
+        *) echo "$s: up to date" ;; esac
     done
     echo "minecraft: running $(mc_current), latest stable $(mc_latest)"
     echo "plex: $(snap list plexmediaserver 2>/dev/null | awk 'NR==2 {print $2}') (snap updates itself)"
