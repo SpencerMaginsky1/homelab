@@ -37,6 +37,14 @@
   --font-ui: "Instrument Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-data: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --r: 10px;
+  /* the Minecraft console is a terminal in both themes */
+  --term-bg: #0d1217;
+  --term-fg: #d3dbe3;
+  --term-dim: #6b7884;
+  --term-warn: #e5b23a;
+  --term-bad: #f0675d;
+  --term-ok: #3fc489;
+  --term-accent: #8db2f7;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -292,6 +300,48 @@ a.ev:hover strong { color: var(--accent); }
 .rb .num { color: var(--muted); }
 .loading { color: var(--muted); padding: 40px 0; text-align: center; }
 
+/* minecraft console */
+.term {
+  background: var(--term-bg); color: var(--term-fg); font-family: var(--font-data); font-size: 12.5px; line-height: 1.55;
+  border-radius: 8px; padding: 12px 14px; height: 440px; overflow: auto;
+}
+.tl { white-space: pre-wrap; overflow-wrap: anywhere; }
+.tl .tt { color: var(--term-dim); }
+.tl.lv-WARN .tm { color: var(--term-warn); }
+.tl.lv-ERROR .tm, .tl.lv-FATAL .tm, .tl.err { color: var(--term-bad); }
+.tl.cont { color: var(--term-dim); padding-left: 2ch; }
+.tl.chat .tm { color: var(--term-accent); }
+.tl.join .tm { color: var(--term-ok); }
+.tl.echo { color: var(--term-accent); }
+.cmdline {
+  display: flex; gap: 8px; align-items: center; background: var(--term-bg); color: var(--term-fg);
+  border-radius: 8px; padding: 6px 6px 6px 14px; font-family: var(--font-data);
+}
+.cmdline:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cmdline span { color: var(--term-ok); }
+.cmdline input { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; color: var(--term-fg); font: inherit; font-size: 13px; padding: 6px 0; }
+.btn {
+  font: inherit; font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { filter: brightness(1.08); color: #fff; }
+.cmdline .btn.primary { padding: 6px 14px; }
+.toolbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.toolbar .grow { flex: 1; }
+.login { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.login input {
+  font: inherit; font-size: 14px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--fg); min-width: 0; flex: 1 1 220px; max-width: 320px;
+}
+.login input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.form-error { color: var(--bad); font-size: 13px; margin: 0; }
+.confirm { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.confirm span { flex: 1 1 260px; }
+.names { display: flex; gap: 6px; flex-wrap: wrap; }
+.names span { background: var(--sunk); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; }
+
 @media (max-width: 1000px) {
   .span-7, .span-5 { grid-column: 1 / -1; }
   .launch { grid-template-columns: minmax(0, 1fr); }
@@ -364,6 +414,7 @@ a.ev:hover strong { color: var(--accent); }
         <section class="panel">
           <div class="panel-head"><h2>Minecraft</h2><span class="meta" id="mc-state"></span></div>
           <div class="mc" id="mc"></div>
+          <div class="panel-head"><span></span><a class="meta go" href="#minecraft">Console and details →</a></div>
         </section>
         <section class="panel">
           <div class="panel-head"><h2>Activity</h2><a class="meta go" href="#activity">See all →</a></div>
@@ -886,6 +937,194 @@ function renderActivity(a) {
     </section>`;
 }
 
+/* ---------- minecraft ---------- */
+
+const CONFIRM = {
+  stop: "This shuts the server down for everyone. The watchdog starts it again within 15 minutes.",
+  op: "This gives a player full operator powers.", deop: "This removes a player's operator powers.",
+  ban: "This bans a player.", "ban-ip": "This bans an IP address.", kill: "This kills players or entities.",
+  "whitelist off": "This lets anyone join, not just whitelisted players.",
+};
+const term = { pos: null, ino: null, timer: null, history: [], hIdx: -1, pending: null };
+try { term.history = JSON.parse(localStorage.getItem("mc-history") || "[]"); } catch {}
+
+async function postJSON(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { status: r.status });
+  return j;
+}
+
+function renderMinecraft(d, quiet) {
+  const s = d.status || {}, mon = d.monitor;
+  const last = d.backups[0];
+  if (!quiet || !$("mc-console")) {
+    $("view-detail").innerHTML = `${crumb}<div id="mc-top" class="view"></div><section class="panel" id="mc-console"></section><div id="mc-info" class="grid"></div>`;
+    renderConsole(d);
+  }
+  $("mc-top").innerHTML = `
+    <div class="dhead">
+      <div>
+        <h2>Minecraft <span class="health ${s.online ? "ok" : "bad"}"><span class="dot"></span>${s.online ? "online" : "offline"}</span></h2>
+        <div class="specs">${[s.version && `Java ${s.version}`, s.address, "port 25565", s.motd].filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join("")}</div>
+      </div>
+      ${mon ? `<div class="dtools"><a href="#monitor-${mon.id}">Uptime details →</a></div>` : ""}
+    </div>
+    <div class="stats">
+      ${tile("Players", s.online ? `${s.players} / ${s.max}` : "–", s.players ? s.names.join(", ") || "online" : "nobody on right now")}
+      ${tile("Version", s.version || "–", "Java edition")}
+      ${tile("Uptime 24 h", mon ? fmtUptime(mon.uptime24) : "–", "from Uptime Kuma")}
+      ${tile("Uptime 30 days", mon ? fmtUptime(mon.uptime30) : "–", "from Uptime Kuma")}
+      ${tile("Last backup", last ? when(last.t) : "–", last ? last.body : "none in 30 days", last ? "" : "warn")}
+      ${tile("World size", d.world_size != null ? fmtBytes(d.world_size) : "–", "world folder")}
+    </div>`;
+  const today = d.today;
+  $("mc-info").innerHTML = `
+    <section class="panel span-5">
+      <div class="panel-head"><h3>Players</h3></div>
+      <dl class="kv">
+        <dt>Online now</dt><dd>${s.players ? `<div class="names">${(s.names.length ? s.names : [`${s.players} players`]).map((n) => `<span>${esc(n)}</span>`).join("")}</div>` : "nobody"}</dd>
+        <dt>Operators</dt><dd>${d.ops.length ? `<div class="names">${d.ops.map((n) => `<span>${esc(n)}</span>`).join("")}</div>` : "none"}</dd>
+        <dt>Whitelist</dt><dd>${d.whitelist.length ? `<div class="names">${d.whitelist.map((n) => `<span>${esc(n)}</span>`).join("")}</div>` : "empty"}</dd>
+        <dt>Banned</dt><dd>${d.banned}</dd>
+      </dl>
+      <div class="panel-head"><h3>Today</h3><span class="meta">joins and leaves</span></div>
+      ${today.length ? `<div class="rb">${today.slice(0, 12).map((j) => `<div><span>${esc(j.name)} ${j.event === "joined" ? "joined" : "left"}</span><span class="num">${esc(j.time)}</span></div>`).join("")}</div>` : `<p class="empty">Nobody has played today.</p>`}
+    </section>
+    <div class="stack span-7">
+      <section class="panel">
+        <div class="panel-head"><h3>Settings</h3><span class="meta">server.properties</span></div>
+        <dl class="kv">${d.props.map(([k, v]) => `<dt class="num">${esc(k)}</dt><dd>${esc(v || "–")}</dd>`).join("")}</dl>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h3>Backups</h3><a class="meta go" href="#activity">All activity →</a></div>
+        ${d.backups.length ? `<div class="rb">${d.backups.map((b) => `<div><span>${esc(when(b.t))}</span><span class="note">${esc(b.body)}</span></div>`).join("")}</div>` : `<p class="empty">No backups in the last 30 days.</p>`}
+      </section>
+    </div>`;
+}
+
+function renderConsole(d) {
+  const box = $("mc-console");
+  if (!box) return;
+  stopConsole();
+  if (!d.console_ready) {
+    box.innerHTML = `<div class="panel-head"><h3>Console</h3></div><p class="empty">No console password is set. Add <code>CONSOLE_PASSWORD=…</code> to <code>~/Desktop/docker/dashboard/.env</code>, then run <code>docker compose up -d</code> in that folder.</p>`;
+    return;
+  }
+  if (!d.authed) {
+    box.innerHTML = `<div class="panel-head"><h3>Console</h3><span class="meta">live log and commands</span></div>
+      <form class="login" id="mc-login" autocomplete="on">
+        <input type="text" name="username" value="console" autocomplete="username" hidden>
+        <input type="password" id="mc-pass" name="password" placeholder="Console password" autocomplete="current-password" aria-label="Console password" required>
+        <button class="btn primary" type="submit">Unlock</button>
+      </form>
+      <p class="form-error" id="mc-login-err" hidden></p>
+      <p class="note">The console shows the server log, including players' IP addresses, and runs commands as the server. It stays unlocked on this browser for 30 days.</p>`;
+    return;
+  }
+  box.innerHTML = `<div class="panel-head"><h3>Console</h3><span class="meta">live · ${d.bridge ? "commands go straight to the server" : "commands are off until the console bridge is installed"}</span></div>
+    <div class="term" id="term" role="log" aria-live="polite"></div>
+    <div class="banner warn confirm" id="mc-confirm" hidden></div>
+    <form class="cmdline" id="mc-cmd"><span>&gt;</span>
+      <input id="mc-input" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="256" placeholder="Type a command, e.g. list or say hello" aria-label="Server command">
+      <button class="btn primary" type="submit">Send</button></form>
+    <div class="toolbar">
+      ${["list", "save-all", "time set day", "weather clear"].map((c) => `<button class="chip" type="button" data-mc="${c}">${c}</button>`).join("")}
+      <button class="chip" type="button" data-mc-fill="say ">say…</button>
+      <button class="chip" type="button" data-mc-fill="whitelist add ">whitelist add…</button>
+      <span class="grow"></span>
+      <button class="btn" type="button" id="mc-lock">Lock console</button>
+    </div>
+    ${d.bridge ? "" : `<p class="note">To send commands, run <code>bash ~/Desktop/docker/dashboard/console-bridge/install.sh</code> on the server once.</p>`}`;
+  term.pos = null; term.ino = null;
+  pollConsole();
+}
+
+function termLine(text) {
+  const m = text.match(/^\[(\d\d:\d\d:\d\d)\] \[([^\]]+?)\/(\w+)\]: (.*)$/);
+  if (!m) return `<div class="tl cont">${esc(text)}</div>`;
+  const msg = m[4];
+  const kind = /^<[^>]+> /.test(msg) ? " chat" : / (joined|left) the game$/.test(msg) ? " join" : "";
+  return `<div class="tl lv-${esc(m[3])}${kind}"><span class="tt">${esc(m[1])}</span> <span class="tm">${esc(msg)}</span></div>`;
+}
+
+function termAppend(html) {
+  const t = $("term");
+  if (!t) return;
+  const atBottom = t.scrollHeight - t.scrollTop - t.clientHeight < 40;
+  t.insertAdjacentHTML("beforeend", html);
+  while (t.childElementCount > 3000) t.firstElementChild.remove();
+  if (atBottom) t.scrollTop = t.scrollHeight;
+}
+
+async function pollConsole() {
+  clearTimeout(term.timer);
+  if (!$("term")) return;
+  try {
+    const r = await api(`/api/console/log?pos=${term.pos ?? ""}&ino=${term.ino ?? ""}`);
+    const t = $("term");
+    if (!t) return;
+    if (r.reset) { t.innerHTML = ""; }
+    term.pos = r.pos; term.ino = r.ino;
+    if (r.lines.length) termAppend(r.lines.map(termLine).join(""));
+    if (r.reset) t.scrollTop = t.scrollHeight;
+  } catch (e) {
+    if (/Unlock/.test(e.message)) { loadDetail(false); return; }
+  }
+  term.timer = setTimeout(pollConsole, document.hidden ? 10000 : 2000);
+}
+
+function stopConsole() { clearTimeout(term.timer); term.timer = null; }
+
+async function sendCommand(cmd, confirmed) {
+  cmd = cmd.trim().replace(/^\//, "");
+  if (!cmd) return;
+  const risky = Object.keys(CONFIRM).find((k) => cmd === k || cmd.startsWith(k + " "));
+  const box = $("mc-confirm");
+  if (risky && !confirmed) {
+    term.pending = cmd;
+    box.innerHTML = `<span><b>${esc(cmd)}</b>: ${esc(CONFIRM[risky])}</span><button class="btn primary" type="button" id="mc-yes">Send it</button><button class="btn" type="button" id="mc-no">Cancel</button>`;
+    box.hidden = false;
+    return;
+  }
+  box.hidden = true; term.pending = null;
+  term.history = [cmd, ...term.history.filter((h) => h !== cmd)].slice(0, 50);
+  try { localStorage.setItem("mc-history", JSON.stringify(term.history)); } catch {}
+  term.hIdx = -1;
+  termAppend(`<div class="tl echo">&gt; ${esc(cmd)}</div>`);
+  const t = $("term"); if (t) t.scrollTop = t.scrollHeight;
+  try {
+    await postJSON("/api/console/command", { cmd });
+    setTimeout(pollConsole, 600);
+  } catch (e) {
+    if (e.status === 401) { loadDetail(false); return; }
+    termAppend(`<div class="tl err">${esc(e.message)}</div>`);
+  }
+}
+
+document.addEventListener("submit", async (e) => {
+  if (e.target.id === "mc-login") {
+    e.preventDefault();
+    const err = $("mc-login-err");
+    try {
+      await postJSON("/api/console/login", { password: $("mc-pass").value });
+      loadDetail(false);
+    } catch (x) { err.textContent = x.message; err.hidden = false; $("mc-pass").select(); }
+  } else if (e.target.id === "mc-cmd") {
+    e.preventDefault();
+    const inp = $("mc-input");
+    sendCommand(inp.value);
+    inp.value = "";
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.id !== "mc-input" || !["ArrowUp", "ArrowDown"].includes(e.key)) return;
+  e.preventDefault();
+  term.hIdx = Math.max(-1, Math.min(term.history.length - 1, term.hIdx + (e.key === "ArrowUp" ? 1 : -1)));
+  e.target.value = term.hIdx < 0 ? "" : term.history[term.hIdx];
+});
+
 /* ---------- loading and routing ---------- */
 
 function drawCharts() {
@@ -898,7 +1137,7 @@ function drawCharts() {
 async function loadDetail(quiet) {
   const cur = current;
   if (!cur) return;
-  const path = cur.type === "activity" ? "/api/activity" : `/api/${cur.type}/${cur.key}?range=${range}`;
+  const path = cur.type === "activity" ? "/api/activity" : cur.type === "minecraft" ? "/api/minecraft" : `/api/${cur.type}/${cur.key}?range=${range}`;
   if (!quiet) { $("view-detail").innerHTML = `${crumb}<p class="loading">Loading…</p>`; detailSig = ""; }
   try {
     const data = await api(path);
@@ -910,6 +1149,7 @@ async function loadDetail(quiet) {
     if (cur.type === "server") renderServer(data);
     else if (cur.type === "monitor") renderMonitor(data);
     else if (cur.type === "container") renderContainer(data);
+    else if (cur.type === "minecraft") renderMinecraft(data, quiet);
     else renderActivity(data);
     if (open.length) document.querySelectorAll("#view-detail .ev details").forEach((d) => { if (open.includes(d.closest(".ev").textContent.slice(0, 80))) d.open = true; });
     drawCharts();
@@ -932,8 +1172,9 @@ async function refreshSummary() {
 function route() {
   const h = location.hash.slice(1);
   const m = h.match(/^(server|monitor|container)-([a-z0-9-]+)$/);
-  current = h === "activity" ? { type: "activity" } : m ? { type: m[1], key: m[2] } : null;
+  current = h === "activity" || h === "minecraft" ? { type: h } : m ? { type: m[1], key: m[2] } : null;
   detail = null;
+  stopConsole();
   $("view-home").hidden = !!current;
   $("view-detail").hidden = !current;
   if (current) loadDetail(false);
@@ -947,7 +1188,14 @@ document.addEventListener("click", (e) => {
   const chip = e.target.closest(".chip[data-cat]");
   if (chip && detail) { actFilter = chip.dataset.cat; renderActivity(detail); return; }
   const row = e.target.closest("tr[data-href]");
-  if (row && !e.target.closest("a")) location.hash = row.dataset.href;
+  if (row && !e.target.closest("a")) { location.hash = row.dataset.href; return; }
+  const mc = e.target.closest("[data-mc]");
+  if (mc) { sendCommand(mc.dataset.mc); return; }
+  const fill = e.target.closest("[data-mc-fill]");
+  if (fill) { const i = $("mc-input"); i.value = fill.dataset.mcFill; i.focus(); return; }
+  if (e.target.id === "mc-yes") { sendCommand(term.pending, true); return; }
+  if (e.target.id === "mc-no") { $("mc-confirm").hidden = true; term.pending = null; return; }
+  if (e.target.id === "mc-lock") { postJSON("/api/console/logout", {}).finally(() => loadDetail(false)); }
 });
 window.addEventListener("hashchange", route);
 let rt;

@@ -1,0 +1,13 @@
+# systemd user service (runs as spencer; lingering is on, so it starts at boot). README 3.14.
+# Install: bash ~/Desktop/docker/dashboard/console-bridge/install.sh
+[Unit]
+Description=Minecraft console bridge for the dashboard
+
+[Service]
+ExecStart=/usr/bin/python3 -I %h/Desktop/docker/dashboard/console-bridge/mc-console-bridge.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

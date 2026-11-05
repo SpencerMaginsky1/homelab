@@ -12,9 +12,14 @@ Serves:
   /api/summary              everything on the main page
   /api/server/<slug>        /api/monitor/<id>        /api/container/<slug>     (?range=1h|12h|24h|7d)
   /api/activity             the last 30 days of events
+  /api/minecraft            server status, settings, players, backups
+  /api/console/log          the Minecraft log from a byte position (needs the console password)
+  POST /api/console/login | logout | command   (command goes to the console bridge on the host)
   /ping                     200 while the web server is up (Docker healthcheck)
 """
+import hmac
 import json
+import secrets
 import os
 import re
 import socket
@@ -40,6 +45,10 @@ MC_ADDRESS = os.environ.get("MC_ADDRESS", "example.duckdns.org")
 WEATHER_LAT = os.environ.get("WEATHER_LAT", "40.71427")
 WEATHER_LON = os.environ.get("WEATHER_LON", "-74.00597")
 WEATHER_NAME = os.environ.get("WEATHER_NAME", "New York")
+MC_DIR = os.environ.get("MC_DIR", "/data/minecraft")
+MC_SOCK = os.environ.get("MC_SOCK", "/run/mc-console/mc-console.sock")
+CONSOLE_PASSWORD = os.environ.get("CONSOLE_PASSWORD", "")
+SESSION_DAYS = 30
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG = os.environ.get("CONFIG", os.path.join(HERE, "config.json"))
 
@@ -790,6 +799,130 @@ def activity_summary(events):
     }
 
 
+# ---------------------------------------------------------------- Minecraft page and console
+
+MC_PROPS = ["motd", "gamemode", "difficulty", "hardcore", "max-players", "white-list", "enforce-whitelist", "online-mode",
+            "pvp", "allow-flight", "view-distance", "simulation-distance", "spawn-protection", "level-name"]
+JOIN_RE = re.compile(r"^\[(\d\d:\d\d:\d\d)\] \[[^\]]+\]: (\w{2,16}) (joined|left) the game")
+
+
+def mc_props():
+    out = {}
+    with open(os.path.join(MC_DIR, "server.properties"), encoding="utf-8") as f:
+        for line in f:
+            k, sep, v = line.strip().partition("=")
+            if sep and k in MC_PROPS:
+                out[k] = v
+    return [[k, out[k]] for k in MC_PROPS if k in out]
+
+
+def mc_names(fname):
+    try:
+        with open(os.path.join(MC_DIR, fname), encoding="utf-8") as f:
+            return sorted((x.get("name") or x.get("ip") or "?") for x in json.load(f))
+    except (OSError, ValueError):
+        return []
+
+
+def world_size():
+    def load():
+        total = 0
+        for root, _, files in os.walk(os.path.join(MC_DIR, "world")):
+            for name in files:
+                try:
+                    total += os.lstat(os.path.join(root, name)).st_size
+                except OSError:
+                    pass
+        return total
+    return cached("world_size", 600, load)
+
+
+def todays_players():
+    """Join/leave lines from today's log, newest first."""
+    out = []
+    try:
+        with open(os.path.join(MC_DIR, "logs", "latest.log"), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = JOIN_RE.match(line)
+                if m:
+                    out.append({"time": m.group(1), "name": m.group(2), "event": m.group(3)})
+    except OSError:
+        pass
+    return out[::-1]
+
+
+def minecraft_detail(authed):
+    errors = {}
+    mon = next((m for m in section(errors, "kuma", kuma_monitors, []) if m["kind"] == "Game server"), None)
+    kd = section(errors, "kuma", lambda: kuma_detail(mon["id"], "24h"), None) if mon else None
+    backups = [e for e in section(errors, "activity", activity, []) if e["src"] == "mc-backup"][:7]
+    return {
+        "status": minecraft(), "props": section(errors, "settings", mc_props, []),
+        "ops": mc_names("ops.json"), "whitelist": mc_names("whitelist.json"),
+        "banned": len(mc_names("banned-players.json")) + len(mc_names("banned-ips.json")),
+        "world_size": section(errors, "world", world_size), "today": todays_players(),
+        "monitor": {k: kd[k] for k in ("id", "uptime24", "uptime7", "uptime30", "outages")} if kd else None,
+        "backups": backups, "authed": authed, "console_ready": bool(CONSOLE_PASSWORD), "bridge": os.path.exists(MC_SOCK),
+        "errors": errors,
+    }
+
+
+def console_log(pos, ino):
+    """New complete lines of latest.log after byte pos. pos=None: the last ~64 KB. A new file (restart or
+    midnight rotation) changes the inode, so the client starts over."""
+    path = os.path.join(MC_DIR, "logs", "latest.log")
+    st = os.stat(path)
+    reset = pos is None or ino != st.st_ino or pos > st.st_size
+    start = max(0, st.st_size - 65536) if pos is None else 0 if reset else pos
+    with open(path, "rb") as f:
+        f.seek(start)
+        data = f.read(min(st.st_size - start, 262144))
+    cut = data.find(b"\n") + 1 if pos is None and start > 0 else 0
+    body = data[cut:]
+    end = body.rfind(b"\n") + 1
+    return {"pos": start + cut + end, "ino": st.st_ino, "reset": reset,
+            "lines": body[:end].decode("utf-8", "replace").splitlines()}
+
+
+def console_send(cmd):
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(8)
+            s.connect(MC_SOCK)
+            s.sendall((json.dumps({"cmd": cmd}) + "\n").encode())
+            data = b""
+            while not data.endswith(b"\n"):
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+        return json.loads(data)
+    except (OSError, ValueError):
+        return {"ok": False, "error": "The console bridge isn't running on the server. Run: bash ~/Desktop/docker/dashboard/console-bridge/install.sh"}
+
+
+_sessions, _fails, _auth_lock = {}, {}, threading.Lock()
+
+
+def login(ip, password):
+    now = time.time()
+    with _auth_lock:
+        _fails[ip] = [t for t in _fails.get(ip, []) if now - t < 300]
+        if len(_fails[ip]) >= 5:
+            return None, "Too many wrong passwords. Try again in 5 minutes."
+    if not CONSOLE_PASSWORD:
+        return None, "No console password is set on the server (CONSOLE_PASSWORD in ~/Desktop/docker/dashboard/.env)."
+    if not hmac.compare_digest(password.encode(), CONSOLE_PASSWORD.encode()):
+        time.sleep(1)
+        with _auth_lock:
+            _fails[ip].append(now)
+        return None, "Wrong password."
+    tok = secrets.token_urlsafe(32)
+    with _auth_lock:
+        _sessions[tok] = now + SESSION_DAYS * 86400
+    return tok, None
+
+
 # ---------------------------------------------------------------- API
 
 def section(errors, name, fn, default=None):
@@ -878,9 +1011,24 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def send(self, code, body, ctype="application/json"):
+    def cookie(self, name):
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == name:
+                return v
+        return None
+
+    def authed(self):
+        tok = self.cookie("mcsess")
+        with _auth_lock:
+            exp = _sessions.get(tok)
+        return bool(exp and exp > time.time())
+
+    def send(self, code, body, ctype="application/json", headers=None):
         data = body if isinstance(body, bytes) else (json.dumps(body, ensure_ascii=False) if ctype == "application/json" else body).encode()
         self.send_response(code)
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.send_header("Content-Type", ctype + ("; charset=utf-8" if ctype.startswith(("text/", "application/json")) else ""))
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
@@ -907,6 +1055,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, summary())
             if p == "/api/activity":
                 return self.send(200, activity_page())
+            if p == "/api/minecraft":
+                return self.send(200, minecraft_detail(self.authed()))
+            if p == "/api/console/log":
+                if not self.authed():
+                    return self.send(401, {"error": "Unlock the console first."})
+                q = urllib.parse.parse_qs(u.query)
+                pos, ino = q.get("pos", [""])[0], q.get("ino", [""])[0]
+                return self.send(200, console_log(int(pos) if pos.isdigit() else None, int(ino) if ino.isdigit() else None))
             m = re.fullmatch(r"/api/(server|monitor|container)/([a-z0-9-]+)", p)
             if m:
                 kind, key = m.groups()
@@ -918,6 +1074,35 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             log(f"{p}: {e!r}")
             return self.send(500, {"error": str(e)})
+
+    def do_POST(self):
+        p = urllib.parse.urlparse(self.path).path
+        if not (self.headers.get("Content-Type") or "").startswith("application/json"):
+            return self.send(415, {"error": "JSON only."})  # plain cross-site form posts can't set this
+        try:
+            body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 4096)) or b"{}")
+        except ValueError:
+            body = {}
+        ip = self.client_address[0]
+        if p == "/api/console/login":
+            tok, err = login(ip, str(body.get("password", "")))
+            if err:
+                return self.send(403, {"error": err})
+            log(f"console unlocked from {ip}")
+            return self.send(200, {"ok": True}, headers={
+                "Set-Cookie": f"mcsess={tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_DAYS * 86400}"})
+        if p == "/api/console/logout":
+            with _auth_lock:
+                _sessions.pop(self.cookie("mcsess"), None)
+            return self.send(200, {"ok": True}, headers={"Set-Cookie": "mcsess=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"})
+        if p == "/api/console/command":
+            if not self.authed():
+                return self.send(401, {"error": "Unlock the console first."})
+            cmd = str(body.get("cmd", ""))
+            res = console_send(cmd)
+            log(f"console command from {ip}: {cmd!r} -> {'ok' if res.get('ok') else res.get('error')}")
+            return self.send(200 if res.get("ok") else 400, res)
+        return self.send(404, {"error": "not found"})
 
 
 if __name__ == "__main__":
