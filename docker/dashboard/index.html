@@ -143,6 +143,29 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .panel-head a.meta:hover { color: var(--accent); }
 .panel-head a.meta.go { color: var(--accent); font-weight: 600; }
 .stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+/* lights (Kasa plugs): one big switch per lamp */
+.lights { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.light {
+  font: inherit; color: inherit; text-align: left; cursor: pointer; width: 100%;
+  display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  padding: 12px; border-radius: 10px; background: var(--sunk); border: 1px solid var(--line);
+  transition: background .15s, border-color .15s;
+}
+.light:hover { border-color: var(--warn); }
+.light strong { display: block; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.light .bulb { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--track); color: var(--faint); transition: background .15s, color .15s; }
+.light .bulb svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.light .sw { width: 38px; height: 22px; border-radius: 999px; background: var(--track); position: relative; transition: background .15s; flex: none; }
+.light .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
+.light[aria-checked="true"] { background: var(--warn-soft); border-color: transparent; }
+.light[aria-checked="true"] .bulb { background: var(--warn); color: var(--surface); }
+.light[aria-checked="true"] .sw { background: var(--warn); }
+.light[aria-checked="true"] .sw::after { transform: translateX(16px); }
+.light.busy { opacity: .6; cursor: progress; }
+.light.offline { cursor: not-allowed; }
+.light.offline .sw { opacity: .4; }
+.lights-err { color: var(--bad); font-size: 12.5px; margin: 0; }
 .note { font-size: 12px; color: var(--muted); margin: 0; }
 code { font-family: var(--font-data); font-size: 11.5px; background: var(--sunk); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
 
@@ -446,6 +469,10 @@ a.rainrow:hover strong { color: var(--accent); }
   .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .stats.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .charts { grid-template-columns: minmax(0, 1fr); }
+  /* one column: lift the lights card to the top of the page, above Servers */
+  .grid > .stack { display: contents; }
+  .grid > .stack > .panel { grid-column: 1 / -1; }
+  #lights-panel { order: -1; }
 }
 @media (max-width: 600px) {
   .machines { grid-template-columns: minmax(0, 1fr); }
@@ -574,6 +601,11 @@ a.rainrow:hover strong { color: var(--accent); }
       </section>
 
       <div class="stack span-5">
+        <section class="panel" id="lights-panel" hidden>
+          <div class="panel-head"><h2>Lights</h2><button class="btn" type="button" id="lights-all"></button></div>
+          <div class="lights" id="lights"></div>
+          <p class="lights-err" id="lights-err" hidden></p>
+        </section>
         <section class="panel">
           <div class="panel-head"><h2>Minecraft</h2><span class="meta" id="mc-state"></span></div>
           <div class="mc" id="mc"></div>
@@ -849,8 +881,51 @@ function renderHome() {
        ${mc.motd ? `<dt>Message</dt><dd>${esc(mc.motd)}</dd>` : ""}</dl>`
     : `<p class="empty">The server isn't answering on port 25565${mc.error ? ` (${esc(mc.error)})` : ""}.</p>`;
 
+  renderLights();
   $("waiting").innerHTML = waitingHtml(S.waiting || []);
   $("feed").innerHTML = S.activity.map((e) => evRow(e, false)).join("") || `<p class="empty">Nothing in the last 30 days.</p>`;
+}
+
+/* ---------- lights ---------- */
+
+const BULB = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1.1 2V16h5v-.2c.1-.8.5-1.5 1.1-2A6 6 0 0 0 12 3z"/></svg>`;
+const lightBusy = new Set();   // ids with a switch request in flight; polling doesn't overwrite them
+
+function renderLights() {
+  const list = (S && S.lights) || [];
+  $("lights-panel").hidden = !list.length;
+  if (!list.length) return;
+  $("lights").innerHTML = list.map((l) => {
+    const note = !l.online ? "Not answering" : l.on ? (l.since ? `On for ${fmtDur((Date.now() - l.since) / 1000)}` : "On") : "Off";
+    return `<button class="light${lightBusy.has(l.id) || lightBusy.has("all") ? " busy" : ""}${l.online ? "" : " offline"}" type="button" role="switch"
+      aria-checked="${l.on && l.online}" data-light="${esc(l.id)}"${l.online ? "" : " disabled"} title="${esc(l.name)} (${esc(l.host)})">
+      <span class="bulb">${BULB}</span><span><strong>${esc(l.name)}</strong><span class="note">${esc(note)}</span></span><span class="sw"></span></button>`;
+  }).join("");
+  const anyOn = list.some((l) => l.on && l.online);
+  const all = $("lights-all");
+  all.textContent = anyOn ? "All off" : "All on";
+  all.dataset.on = String(!anyOn);
+  all.disabled = !list.some((l) => l.online) || lightBusy.size > 0;
+}
+
+async function switchLight(id, on) {
+  if (lightBusy.size) return;
+  lightBusy.add(id);
+  for (const l of S.lights) if ((id === "all" || l.id === id) && l.online) l.on = on;   // flip now, confirm below
+  renderLights();
+  const err = $("lights-err");
+  try {
+    const r = await postJSON("/api/lights", { id, on });
+    S.lights = r.lights;
+    err.hidden = true;
+  } catch (e) {
+    err.textContent = `Couldn't switch: ${e.message}`;
+    err.hidden = false;
+    try { S = await api("/api/summary"); } catch {}
+  } finally {
+    lightBusy.delete(id);
+    renderLights();
+  }
 }
 
 /* ---------- charts ---------- */
@@ -1561,8 +1636,9 @@ async function loadDetail(quiet) {
 
 async function refreshSummary() {
   try {
-    const first = !S;
+    const first = !S, prev = S;
     S = await api("/api/summary");
+    if (lightBusy.size && prev) S.lights = prev.lights;   // a switch is mid-flight; keep its optimistic state
     $("offline").hidden = true;
     // a server page opened straight from a link was drawn before the machine list (its switcher) arrived
     if (first && current && current.type === "server" && detail) { renderServer(detail); drawCharts(); }
@@ -1616,6 +1692,9 @@ document.addEventListener("click", (e) => {
   if (chip && detail) { actFilter = chip.dataset.cat; renderActivity(detail); return; }
   const row = e.target.closest("tr[data-href]");
   if (row && !e.target.closest("a")) { location.hash = row.dataset.href; return; }
+  const light = e.target.closest("[data-light]");
+  if (light) { switchLight(light.dataset.light, light.getAttribute("aria-checked") !== "true"); return; }
+  if (e.target.id === "lights-all") { switchLight("all", e.target.dataset.on === "true"); return; }
   const mc = e.target.closest("[data-mc]");
   if (mc) { sendCommand(mc.dataset.mc); return; }
   const fill = e.target.closest("[data-mc-fill]");

@@ -7,6 +7,7 @@ Reads everything read-only and needs no passwords:
   journal      /var/log/journal via journalctl: health reports, updater, backups, watchdog
   Minecraft    a server-list ping to HOST_IP:MC_PORT
   weather      Open-Meteo (no key)
+  lights       TP-Link Kasa plugs on the LAN over local KLAP (KASA_USERNAME/PASSWORD in .env; no cloud)
 Serves:
   /                         the page (index.html)
   /api/summary              everything on the main page
@@ -16,7 +17,8 @@ Serves:
   /api/weather              current conditions, 5-day forecast, next 24 hours
   /api/console/log          the Minecraft log from a byte position (needs the console password)
   POST /api/console/login | logout | command   (command goes to the console bridge on the host)
-  /ping                     200 while the web server is up (Docker healthcheck)
+  POST /api/lights          {"id": "<plug id>" | "all", "on": true|false}   switch a light (state is in /api/summary)
+  /ping                    200 while the web server is up (Docker healthcheck)
 """
 import hashlib
 import hmac
@@ -50,6 +52,9 @@ WEATHER_NAME = os.environ.get("WEATHER_NAME", "New York")
 MC_DIR = os.environ.get("MC_DIR", "/data/minecraft")
 MC_SOCK = os.environ.get("MC_SOCK", "/run/mc-console/mc-console.sock")
 CONSOLE_PASSWORD = os.environ.get("CONSOLE_PASSWORD", "")
+KASA_HOSTS = [h.strip() for h in os.environ.get("KASA_HOSTS", "").split(",") if h.strip()]
+KASA_USERNAME = os.environ.get("KASA_USERNAME", "")
+KASA_PASSWORD = os.environ.get("KASA_PASSWORD", "")
 SESSION_DAYS = 30
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG = os.environ.get("CONFIG", os.path.join(HERE, "config.json"))
@@ -693,6 +698,131 @@ def forecast():
     return cached("forecast", 900, load)
 
 
+# ---------------------------------------------------------------- lights (TP-Link Kasa plugs)
+# HS103 v5 firmware only speaks KLAP v2: two HTTP handshakes prove both sides know
+# sha256(sha1(user) + sha1(password)), then each request is AES-CBC with a counter IV.
+# Same scheme as python-kasa's KlapTransportV2. Everything stays on the LAN.
+
+class Klap:
+    TTL = 20 * 60   # devices keep a session ~24 h; renew well before that
+
+    def __init__(self, host):
+        self.host, self.lock, self.exp = host, threading.Lock(), 0
+        self.auth = hashlib.sha256(hashlib.sha1(KASA_USERNAME.encode()).digest()
+                                   + hashlib.sha1(KASA_PASSWORD.encode()).digest()).digest()
+
+    def _post(self, path, body, timeout=4):
+        r = urllib.request.Request(f"http://{self.host}/app/{path}", data=body, method="POST")
+        if self.exp:
+            r.add_header("Cookie", self.cookie)
+        with urllib.request.urlopen(r, timeout=timeout) as resp:
+            return resp.read(), resp.headers.get("Set-Cookie") or ""
+
+    def _handshake(self):
+        sha = lambda b: hashlib.sha256(b).digest()  # noqa: E731
+        self.exp, ls = 0, secrets.token_bytes(16)
+        d, ck = self._post("handshake1", ls)
+        rs = d[:16]
+        if sha(ls + rs + self.auth) != d[16:48]:
+            raise RuntimeError("the plug rejected the Kasa login (check KASA_USERNAME/KASA_PASSWORD)")
+        self.cookie = ck.split(";")[0]
+        self.exp = time.time() + self.TTL
+        self._post("handshake2", sha(rs + ls + self.auth))
+        self.key = sha(b"lsk" + ls + rs + self.auth)[:16]
+        iv = sha(b"iv" + ls + rs + self.auth)
+        self.iv, self.seq = iv[:12], int.from_bytes(iv[-4:], "big", signed=True)
+        self.sig = sha(b"ldk" + ls + rs + self.auth)[:28]
+
+    def _send(self, obj):
+        from cryptography.hazmat.primitives import padding
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        self.seq += 1
+        sb = self.seq.to_bytes(4, "big", signed=True)
+        aes = Cipher(algorithms.AES(self.key), modes.CBC(self.iv + sb))
+        pad = padding.PKCS7(128).padder()
+        enc = aes.encryptor()
+        ct = enc.update(pad.update(json.dumps(obj).encode()) + pad.finalize()) + enc.finalize()
+        d, _ = self._post(f"request?seq={self.seq}", hashlib.sha256(self.sig + sb + ct).digest() + ct)
+        dec, unpad = aes.decryptor(), padding.PKCS7(128).unpadder()
+        return json.loads(unpad.update(dec.update(d[32:]) + dec.finalize()) + unpad.finalize())
+
+    def call(self, obj):
+        with self.lock:
+            for attempt in (0, 1):   # a stale session (plug rebooted, expired) gets one fresh handshake
+                try:
+                    if time.time() > self.exp:
+                        self._handshake()
+                    return self._send(obj)
+                except Exception:
+                    self.exp = 0
+                    if attempt:
+                        raise
+
+
+_plugs = {h: Klap(h) for h in KASA_HOSTS}
+_lights, _lights_lock = {}, threading.Lock()
+
+
+def _light_state(host, info):
+    return {"id": slug(host), "host": host, "name": info.get("alias") or host,
+            "on": bool(info.get("relay_state")), "online": True, "model": info.get("model", ""),
+            "since": int(time.time() * 1000) - int(info.get("on_time") or 0) * 1000 if info.get("relay_state") else None}
+
+
+def poll_light(host):
+    try:
+        info = _plugs[host].call({"system": {"get_sysinfo": {}}})["system"]["get_sysinfo"]
+        st = _light_state(host, info)
+    except Exception as e:  # noqa: BLE001
+        with _lights_lock:
+            old = _lights.get(host, {"id": slug(host), "host": host, "name": host, "on": False})
+        if old.get("online", True):
+            log(f"lights: {host}: {e}")
+        st = {**old, "online": False, "error": str(e)}
+    with _lights_lock:
+        _lights[host] = st
+    return st
+
+
+def lights_poller():
+    while True:
+        threads = [threading.Thread(target=poll_light, args=(h,), daemon=True) for h in KASA_HOSTS]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(10)
+        time.sleep(10)
+
+
+def lights():
+    with _lights_lock:
+        return [_lights[h] for h in KASA_HOSTS if h in _lights]
+
+
+def set_light(lid, on):
+    with _lights_lock:
+        hosts = [h for h, s in _lights.items() if lid == "all" or s["id"] == lid]
+    if not hosts:
+        return {"error": "No light with that id."}
+    errs = []
+
+    def one(h):
+        try:
+            res = _plugs[h].call({"system": {"set_relay_state": {"state": 1 if on else 0}}})
+            if res.get("system", {}).get("set_relay_state", {}).get("err_code", 0):
+                raise RuntimeError(res["system"]["set_relay_state"].get("err_msg", "plug refused"))
+        except Exception as e:  # noqa: BLE001
+            with _lights_lock:
+                errs.append(f"{_lights[h]['name']}: {e}")
+        poll_light(h)
+    threads = [threading.Thread(target=one, args=(h,), daemon=True) for h in hosts]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(12)
+    return {"ok": not errs, "error": "; ".join(errs) or None, "lights": lights()}
+
+
 # ---------------------------------------------------------------- activity (journal + Kuma)
 
 def journal(since):
@@ -1082,6 +1212,7 @@ def summary():
         "machines": machines, "monitors": monitors, "containers": ctrs,
         "minecraft": section(errors, "minecraft", minecraft),
         "weather": section(errors, "weather", weather),
+        "lights": lights(),
         "activity": [brief(e) for e in events[:5]], "waiting": activity_summary(events)["waiting"],
         "errors": errors,
     }
@@ -1219,9 +1350,19 @@ class Handler(BaseHTTPRequestHandler):
             res = console_send(cmd)
             log(f"console command from {ip}: {cmd!r} -> {'ok' if res.get('ok') else res.get('error')}")
             return self.send(200 if res.get("ok") else 400, res)
+        if p == "/api/lights":
+            if not isinstance(body.get("on"), bool):
+                return self.send(400, {"error": "Say on: true or on: false."})
+            res = set_light(str(body.get("id", "")), body["on"])
+            log(f"lights from {ip}: {body.get('id')} -> {'on' if body['on'] else 'off'}{'' if res.get('ok') else ': ' + str(res.get('error'))}")
+            return self.send(200 if res.get("ok") else 502, res)
         return self.send(404, {"error": "not found"})
 
 
 if __name__ == "__main__":
     log(f"dashboard listening on :{PORT}")
+    if KASA_HOSTS:
+        if not (KASA_USERNAME and KASA_PASSWORD):
+            log("lights: KASA_HOSTS is set but KASA_USERNAME/KASA_PASSWORD aren't; the plugs will show offline")
+        threading.Thread(target=lights_poller, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
