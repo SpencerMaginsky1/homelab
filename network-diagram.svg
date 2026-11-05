@@ -90,7 +90,7 @@
 
     <rect x="328" y="474" width="207" height="40" rx="6" class="svc"/>
     <text x="431" y="491" class="t" text-anchor="middle" font-weight="600">Homarr :7575</text>
-    <text x="431" y="506" class="s" text-anchor="middle">dashboard · bridge br-homarr</text>
+    <text x="431" y="506" class="s" text-anchor="middle">old dashboard · bridge br-homarr</text>
 
     <rect x="545" y="474" width="207" height="40" rx="6" class="svc"/>
     <text x="648" y="491" class="t" text-anchor="middle" font-weight="600">Uptime Kuma :3001</text>
@@ -110,7 +110,7 @@
 
     <rect x="545" y="566" width="207" height="40" rx="6" class="svc"/>
     <text x="648" y="583" class="t" text-anchor="middle" font-weight="600">Docker bridges</text>
-    <text x="648" y="598" class="s" text-anchor="middle">172.17 · 172.18 · 172.19</text>
+    <text x="648" y="598" class="s" text-anchor="middle">172.17 – 172.22 · 6 networks</text>
 
     <rect x="328" y="612" width="207" height="40" rx="6" class="svc"/>
     <text x="431" y="629" class="t" text-anchor="middle" font-weight="600">Docs :8000</text>
@@ -123,6 +123,10 @@
     <rect x="328" y="658" width="207" height="40" rx="6" class="svc"/>
     <text x="431" y="675" class="t" text-anchor="middle" font-weight="600">Ship Tracker :8100</text>
     <text x="431" y="690" class="s" text-anchor="middle">live NYC + Long Island ships</text>
+
+    <rect x="545" y="658" width="207" height="40" rx="6" class="svc"/>
+    <text x="648" y="675" class="t" text-anchor="middle" font-weight="600">Dashboard :7576</text>
+    <text x="648" y="690" class="s" text-anchor="middle">main page · LAN + tailnet</text>
   </g>
 
   <text x="330" y="716" class="t" font-weight="700">Networking</text>
@@ -214,7 +218,7 @@
   <text x="898" y="724" class="s">from 192.168.1.179 (rule 5209, e.g. port-forwarded Minecraft).</text>
 
   <g class="badge"><circle cx="880" cy="750" r="10" stroke="#4dabf7"/><text x="880" y="750" fill="#4dabf7">4</text></g>
-  <text x="898" y="754" class="s">Remote access over tailnet: Homarr :7575 · Kuma :3001 · Beszel :8090.</text>
+  <text x="898" y="754" class="s">Remote over tailnet: Dashboard :7576 · Homarr · Kuma :3001 · Beszel :8090.</text>
 
   <g class="badge"><circle cx="880" cy="780" r="10" stroke="#4dabf7"/><text x="880" y="780" fill="#4dabf7">5</text></g>
   <text x="898" y="784" class="s">Monitoring: Kuma ping + Beszel hub → Pi agent :45876.</text>
