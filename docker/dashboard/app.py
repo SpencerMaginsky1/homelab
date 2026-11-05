@@ -182,6 +182,7 @@ def beszel_systems():
                     "kernel": d.get("kernel"), "os": d.get("os_name"), "arch": d.get("arch"), "agent": info.get("v"),
                     "spark": spark,
                 })
+            out.sort(key=lambda m: m["id"] != "spencer-server")  # the main server first, then the rest by name
             return out
     return cached("systems", 10, load)
 

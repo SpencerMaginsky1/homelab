@@ -474,6 +474,21 @@ a.rainrow:hover strong { color: var(--accent); }
   .tabbar svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 }
 
+/* server picker that the Servers tab opens */
+.sheet {
+  position: fixed; inset: 0; z-index: 30; background: rgba(8, 12, 16, .45); display: flex; align-items: flex-end; justify-content: center;
+  padding: 0 max(12px, env(safe-area-inset-right, 0px)) calc(84px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+}
+.sheet-card {
+  width: 100%; max-width: 480px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 10px 40px rgba(0, 0, 0, .25);
+}
+.sheet-list { display: flex; flex-direction: column; gap: 8px; }
+.sheet-item { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 3px 12px; align-items: center; padding: 12px 14px; border-radius: 10px; background: var(--sunk); border: 1px solid transparent; }
+.sheet-item[aria-current="page"], .sheet-item:hover { border-color: var(--accent); }
+.sheet-item strong { font-size: 15px; }
+.sheet-item .note { grid-column: 2; overflow-wrap: anywhere; }
+
 /* phones: tighter header, swipeable links, container cards, no input zoom */
 @media (max-width: 600px) {
   .wrap { gap: 12px; }
@@ -578,11 +593,18 @@ a.rainrow:hover strong { color: var(--accent); }
 
 <nav class="tabbar" aria-label="Sections">
   <a href="#" data-tab="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</a>
-  <a href="#server-spencer-server" data-tab="server"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>Server</a>
+  <a href="#server-spencer-server" data-tab="server" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>Servers</a>
   <a href="#weather" data-tab="weather"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2.5V4M2.5 8H4M4.1 4.1l1 1M11.9 4.1l-1 1"/><path d="M5.2 10.6A3.5 3.5 0 1 1 11.4 7.5"/><path d="M9 20h8a3.5 3.5 0 0 0 .5-6.96A5 5 0 0 0 8.4 13.6 3.2 3.2 0 0 0 9 20z"/></svg>Weather</a>
   <a href="#minecraft" data-tab="minecraft"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l6-6-6-6M12 19h8"/></svg>Minecraft</a>
   <a href="#activity" data-tab="activity"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Activity</a>
 </nav>
+
+<div class="sheet" id="server-sheet" hidden>
+  <div class="sheet-card" role="dialog" aria-label="Choose a server">
+    <div class="panel-head"><h3>Servers</h3><button class="btn" type="button" id="sheet-close">Close</button></div>
+    <div class="sheet-list" id="sheet-list"></div>
+  </div>
+</div>
 
 <script>
 const RANGES = {
@@ -942,7 +964,8 @@ function renderServer(m) {
         <div class="specs">${[m.cpu_model, `${m.cores} cores / ${m.threads} threads`, `${fmtGB(m.ram[1])} RAM`, m.os, `kernel ${m.kernel}`, `Beszel agent ${m.agent}`]
           .map((s) => `<span>${esc(s)}</span>`).join("")}</div>
       </div>
-      <div class="dtools">${tabs()}<a href="${appUrl(8090)}" target="_blank" rel="noopener">Open in Beszel →</a></div>
+      <div class="dtools">${S && S.machines.length > 1 ? `<div class="tabs" role="tablist" aria-label="Machine">${S.machines.map((x) =>
+        `<a role="tab" href="#server-${esc(x.id)}" aria-selected="${x.id === m.id}">${esc(x.name)}</a>`).join("")}</div>` : ""}${tabs()}<a href="${appUrl(8090)}" target="_blank" rel="noopener">Open in Beszel →</a></div>
     </div>
     <div class="stats">
       ${tile("CPU", fmtPct(m.cpu), `${m.threads} threads`, level(m.cpu))}
@@ -1538,8 +1561,11 @@ async function loadDetail(quiet) {
 
 async function refreshSummary() {
   try {
+    const first = !S;
     S = await api("/api/summary");
     $("offline").hidden = true;
+    // a server page opened straight from a link was drawn before the machine list (its switcher) arrived
+    if (first && current && current.type === "server" && detail) { renderServer(detail); drawCharts(); }
     renderTop();
     if (!current) renderHome();
   } catch {
@@ -1555,6 +1581,7 @@ function route() {
     : m ? { type: m[1], key: m[2] } : null;
   detail = null;
   stopConsole();
+  closeSheet();
   const tab = !current ? "home" : current.type === "server" ? "server" : current.type === "minecraft" ? "minecraft"
     : current.type === "weather" || current.type === "weatherday" ? "weather"
     : current.type === "activity" || current.type === "event" ? "activity" : "";
@@ -1566,7 +1593,23 @@ function route() {
   window.scrollTo(0, 0);
 }
 
+function openServerSheet() {
+  const list = (S && S.machines) || [];
+  if (!list.length) { location.hash = "#server-spencer-server"; return; }
+  const open = current && current.type === "server" ? current.key : null;
+  $("sheet-list").innerHTML = list.map((m) => `<a class="sheet-item" href="#server-${esc(m.id)}"${m.id === open ? ' aria-current="page"' : ""}>
+    <span class="dot ${m.status === "up" ? "st-1" : "st-0"}"></span><strong>${esc(m.name)}</strong>
+    <span class="note">${esc(m.os)} · ${esc(m.cpu_model)}</span>
+    <span class="note num">CPU ${fmtPct(m.cpu)} · RAM ${n1(m.ram[0])} / ${n1(m.ram[1])} GB${m.temp != null ? ` · ${Math.round(m.temp)} °C` : ""}</span></a>`).join("");
+  $("server-sheet").hidden = false;
+}
+const closeSheet = () => { $("server-sheet").hidden = true; };
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
+
 document.addEventListener("click", (e) => {
+  if (e.target.closest('.tabbar a[data-tab="server"]')) { e.preventDefault(); if ($("server-sheet").hidden) openServerSheet(); else closeSheet(); return; }
+  if (e.target.id === "server-sheet" || e.target.id === "sheet-close") { closeSheet(); return; }
+  if (e.target.closest(".sheet-item")) closeSheet();  // the link itself navigates
   const tab = e.target.closest(".tabs button[data-range]");
   if (tab) { range = tab.dataset.range; store.set("range", range); loadDetail(true); document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.range === range))); return; }
   const chip = e.target.closest(".chip[data-cat]");
