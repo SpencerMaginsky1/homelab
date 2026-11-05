@@ -344,7 +344,7 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
 - **Commands:** `docker logs ships` (feed connects and errors) · `curl -s localhost:8100/health`.
 
 ### 3.14 Dashboard (custom, added 2026-11-05)
-- **What:** one page with the servers, Uptime Kuma monitors, Docker containers, Minecraft and recent activity, plus quick links. Clicking a server, monitor or container opens a detail page with history graphs (1 h / 12 h / 24 h / 7 days); "See all" opens 30 days of activity. Built to replace Homarr (3.1).
+- **What:** one page with the servers, Uptime Kuma monitors, Docker containers, Minecraft and recent activity, plus quick links. Clicking a server, monitor or container opens a detail page with history graphs (1 h / 12 h / 24 h / 7 days); "See all" opens 30 days of activity, and each activity message opens its own page (`#event-<id>`: full report, raw journal lines, a copy button for any `sudo` command in it, links to the related monitor/container and the older/newer message of the same kind). Built to replace Homarr (3.1).
 - **Open it at** http://192.168.1.179:7576, or http://spencer-server:7576 over Tailscale. Published by Docker, so it skips ufw: LAN and tailnet only, not forwarded by the router. **No login**, so anyone on the home Wi-Fi can view it (read-only). Links on the page use whatever address you opened it with, so they work over Tailscale too.
 - **Where the data comes from** (all read-only, **no passwords or secrets**):
 

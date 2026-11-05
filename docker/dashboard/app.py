@@ -17,6 +17,7 @@ Serves:
   POST /api/console/login | logout | command   (command goes to the console bridge on the host)
   /ping                     200 while the web server is up (Docker healthcheck)
 """
+import hashlib
 import hmac
 import json
 import secrets
@@ -636,8 +637,15 @@ def journal(since):
     return entries
 
 
-def ev(t, sev, cat, src, title, body="", lines=None, link=None):
-    return {"t": t, "sev": sev, "cat": cat, "src": src, "title": title, "body": body, "lines": lines or [], "link": link}
+def ev(t, sev, cat, src, title, body="", lines=None, link=None, raw=None):
+    """One activity event. The id is stable across reloads, so #event-<id> links keep working."""
+    eid = hashlib.sha1(f"{src}|{t}|{title}".encode()).hexdigest()[:10]
+    return {"id": eid, "t": t, "sev": sev, "cat": cat, "src": src, "title": title, "body": body,
+            "lines": lines or [], "link": link, "raw": raw or []}
+
+
+def raw_of(*entries):
+    return [{"t": e["t"], "text": e["msg"]} for e in entries if e]
 
 
 TITLE_RE = re.compile(r"^(✅|⚠️?|🚨)\s*(?:[\w.-]+:\s*)?(.*)$")
@@ -648,7 +656,8 @@ def health_events(es):
     for ti in (e for e in es if TITLE_RE.match(e["msg"])):
         sym, text = TITLE_RE.match(ti["msg"]).groups()
         fails, warns, passed, sec = [], [], [], None
-        for e in sorted((e for e in es if abs(e["t"] - ti["t"]) <= 120_000 and e["pid"] != ti["pid"]), key=lambda e: e["t"]):
+        run = sorted((e for e in es if abs(e["t"] - ti["t"]) <= 120_000 and e["pid"] != ti["pid"]), key=lambda e: e["t"])
+        for e in run:
             m = e["msg"]
             if m.startswith("FAILURES"):
                 sec = fails
@@ -664,7 +673,7 @@ def health_events(es):
         body = "; ".join(fails + warns) if fails or warns else f"All {len(passed)} checks passed." if passed else ""
         lines = [{"sev": "bad", "text": x} for x in fails] + [{"sev": "warn", "text": x} for x in warns] + \
                 [{"sev": "ok", "text": x} for x in passed]
-        out.append(ev(ti["t"], sev, "report", "healthcheck", f"Health report: {text}", body, lines))
+        out.append(ev(ti["t"], sev, "report", "healthcheck", f"Health report: {text}", body, lines, None, raw_of(ti, *run)))
     return out
 
 
@@ -677,27 +686,30 @@ def svc_link(svc):
 
 
 def updater_events(es):
-    out = []
+    out, started = [], {}
     for e in es:
         m, t = e["msg"], e["t"]
         head, _, rest = m.partition(": ")
         items = [x.strip() for x in rest.split(";") if x.strip()]
-        if m.startswith("UPDATED "):
+        if m.startswith("UPDATING "):
+            started[m.split()[1]] = e
+        elif m.startswith("UPDATED "):
             svc = head[8:]
-            out.append(ev(t, "info", "update", "updater", f"Updated {svc}", "; ".join(items[:2]), [{"sev": "ok", "text": x} for x in items], svc_link(svc)))
+            out.append(ev(t, "info", "update", "updater", f"Updated {svc}", "; ".join(items[:2]), [{"sev": "ok", "text": x} for x in items],
+                          svc_link(svc), raw_of(started.pop(svc, None), e)))
         elif m.startswith("AVAILABLE "):
             svc = head[10:]
             out.append(ev(t, "warn", "waiting", "updater", f"Update waiting for you: {svc}",
-                          f"{'; '.join(items)}. Run sudo homelab-updater apply {svc}", None, svc_link(svc)))
+                          f"{'; '.join(items)}. Run sudo homelab-updater apply {svc}", None, svc_link(svc), raw_of(e)))
         elif m.startswith("FAILED "):
             svc = head[7:]
-            out.append(ev(t, "bad", "problem", "updater", f"Update problem: {svc}", rest, None, svc_link(svc)))
+            out.append(ev(t, "bad", "problem", "updater", f"Update problem: {svc}", rest, None, svc_link(svc), raw_of(started.get(svc), e)))
         elif m.startswith("ROLLEDBACK "):
             svc = m.split()[1]
-            out.append(ev(t, "warn", "update", "updater", f"Rolled back {svc}", m, None, svc_link(svc)))
+            out.append(ev(t, "warn", "update", "updater", f"Rolled back {svc}", m, None, svc_link(svc), raw_of(e)))
         elif m.startswith("pull failed for "):
             svc = m[16:]
-            out.append(ev(t, "warn", "update", "updater", f"Couldn't download the {svc} update", "It tries again at the next run."))
+            out.append(ev(t, "warn", "update", "updater", f"Couldn't download the {svc} update", "It tries again at the next run.", None, None, raw_of(e)))
     return out
 
 
@@ -706,19 +718,23 @@ def watchdog_events(es):
     for e in es:
         m = e["msg"]
         if m.startswith("FIXED "):
-            out.append(ev(e["t"], "warn", "problem", "watchdog", f"Watchdog restarted {m[6:]}", "It was down; restarting it fixed it."))
+            out.append(ev(e["t"], "warn", "problem", "watchdog", f"Watchdog restarted {m[6:]}", "It was down; restarting it fixed it.", None, None, raw_of(e)))
         elif m.startswith("FAILED "):
             key, _, rest = m[7:].partition(": ")
-            out.append(ev(e["t"], "bad", "problem", "watchdog", f"Watchdog couldn't fix {key}", rest))
+            out.append(ev(e["t"], "bad", "problem", "watchdog", f"Watchdog couldn't fix {key}", rest, None, None, raw_of(e)))
         elif m.startswith("RECOVERED "):
-            out.append(ev(e["t"], "ok", "problem", "watchdog", f"{m[10:]} is back up"))
+            out.append(ev(e["t"], "ok", "problem", "watchdog", f"{m[10:]} is back up", "", None, None, raw_of(e)))
     return out
 
 
 def backup_events(es):
-    out, done, extra = [], None, []
+    out, done, extra, run = [], None, [], []
     for e in sorted(es, key=lambda e: e["t"]):
         m = e["msg"]
+        # a run starts at "players online" (when it warns players first) or at "backup started"
+        if m.startswith("players online:") or m.startswith("backup started") and not (run and run[-1]["msg"].startswith("players online:")):
+            run = []
+        run.append(e)
         if m.startswith("backup done:"):
             done = m
         elif m.startswith("weekly integrity check OK"):
@@ -730,14 +746,15 @@ def backup_events(es):
             body = ", ".join(x for x in [f"Snapshot {snap.group(1)} saved" if snap else "Saved",
                                          f"{n.group(1)} snapshots kept" if n else "", f"{size.group(1)} total" if size else ""] if x)
             lines = extra + ([{"sev": "ok", "text": f"Added {added.group(1)} of changes"}] if added else [])
-            out.append(ev(e["t"], "ok", "backup", "mc-backup", "Minecraft backup done", body, lines))
-            done, extra = None, []
+            out.append(ev(e["t"], "ok", "backup", "mc-backup", "Minecraft backup done", body, lines, "#minecraft", raw_of(*run)))
+            done, extra, run = None, [], []
         elif m.startswith("FAILED:"):
-            out.append(ev(e["t"], "bad", "problem", "mc-backup", "Minecraft backup failed", m[7:].strip()))
+            out.append(ev(e["t"], "bad", "problem", "mc-backup", "Minecraft backup failed", m[7:].strip(), None, "#minecraft", raw_of(*run)))
+            run = []
         elif m.startswith("RESTORED"):
-            out.append(ev(e["t"], "info", "backup", "mc-backup", "Minecraft world restored", m))
+            out.append(ev(e["t"], "info", "backup", "mc-backup", "Minecraft world restored", m, None, "#minecraft", raw_of(*run)))
         elif m.startswith("warning:"):
-            out.append(ev(e["t"], "warn", "backup", "mc-backup", "Backup warning", m[8:].strip()))
+            out.append(ev(e["t"], "warn", "backup", "mc-backup", "Backup warning", m[8:].strip(), None, "#minecraft", raw_of(e)))
     return out
 
 
@@ -760,11 +777,12 @@ def kuma_events(since):
                            (since_utc(time.time() - since),)):
             t, mid = utc_ms(r["time"]), r["monitor_id"]
             name = names.get(mid, f"Monitor {mid}")
+            raw = [{"t": t, "text": f"{name}: {'DOWN' if r['status'] == 0 else 'UP'}" + (f" - {r['msg'].strip()}" if r["msg"] else "")}]
             if r["status"] == 0:
                 downs[mid] = t
-                out.append(ev(t, "bad", "problem", "Uptime Kuma", f"{name} is down", outage_reason(r["msg"]), None, f"#monitor-{mid}"))
+                out.append(ev(t, "bad", "problem", "Uptime Kuma", f"{name} is down", outage_reason(r["msg"]), None, f"#monitor-{mid}", raw))
             elif r["status"] == 1 and mid in downs:
-                out.append(ev(t, "ok", "problem", "Uptime Kuma", f"{name} is back up", f"Down for {fmt_dur(t - downs.pop(mid))}", None, f"#monitor-{mid}"))
+                out.append(ev(t, "ok", "problem", "Uptime Kuma", f"{name} is back up", f"Down for {fmt_dur(t - downs.pop(mid))}", None, f"#monitor-{mid}", raw))
     return out
 
 
@@ -985,7 +1003,7 @@ def summary():
         "machines": machines, "monitors": monitors, "containers": ctrs,
         "minecraft": section(errors, "minecraft", minecraft),
         "weather": section(errors, "weather", weather),
-        "activity": events[:5], "waiting": activity_summary(events)["waiting"],
+        "activity": [brief(e) for e in events[:5]], "waiting": activity_summary(events)["waiting"],
         "errors": errors,
     }
 
@@ -998,9 +1016,23 @@ def server_detail(sslug, rng):
             "containers": [c for c in containers() if c["host"] == sslug]}
 
 
+def brief(e):
+    return {k: v for k, v in e.items() if k != "raw"} if e else None
+
+
 def activity_page():
     events = activity()
-    return {"events": events, "summary": activity_summary(events), "days": ACTIVITY_DAYS}
+    return {"events": [brief(e) for e in events], "summary": activity_summary(events), "days": ACTIVITY_DAYS}
+
+
+def event_detail(eid):
+    events = activity()
+    e = next((x for x in events if x["id"] == eid), None)
+    if not e:
+        return None
+    same = [x for x in events if x["src"] == e["src"] and x["cat"] == e["cat"]]
+    i = same.index(e)
+    return {**e, "newer": brief(same[i - 1]) if i > 0 else None, "older": brief(same[i + 1]) if i + 1 < len(same) else None}
 
 
 STATIC = {"/favicon.svg": ("favicon.svg", "image/svg+xml"), "/favicon.ico": ("favicon.ico", "image/x-icon"),
@@ -1063,9 +1095,12 @@ class Handler(BaseHTTPRequestHandler):
                 q = urllib.parse.parse_qs(u.query)
                 pos, ino = q.get("pos", [""])[0], q.get("ino", [""])[0]
                 return self.send(200, console_log(int(pos) if pos.isdigit() else None, int(ino) if ino.isdigit() else None))
-            m = re.fullmatch(r"/api/(server|monitor|container)/([a-z0-9-]+)", p)
+            m = re.fullmatch(r"/api/(server|monitor|container|event)/([a-z0-9-]+)", p)
             if m:
                 kind, key = m.groups()
+                if kind == "event":
+                    data = event_detail(key)
+                    return self.send(200, data) if data else self.send(404, {"error": f"No activity with that id in the last {ACTIVITY_DAYS} days."})
                 data = (server_detail(key, rng) if kind == "server" else
                         kuma_detail(int(key), rng) if kind == "monitor" and key.isdigit() else
                         container_detail(key, rng) if kind == "container" else None)

@@ -339,6 +339,20 @@ a.ev:hover strong { color: var(--accent); }
 .form-error { color: var(--bad); font-size: 13px; margin: 0; }
 .confirm { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .confirm span { flex: 1 1 260px; }
+/* activity event page */
+.lead { margin: 0; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
+.cmdbox { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: var(--sunk); border-radius: 8px; padding: 8px 8px 8px 12px; }
+.cmdbox code { background: transparent; padding: 0; font-size: 13px; flex: 1 1 240px; }
+.dots { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; }
+.dots li { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 10px; align-items: baseline; overflow-wrap: anywhere; }
+.dots li::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); transform: translateY(-1px); }
+.dots li.warn::before { background: var(--warn); } .dots li.bad::before { background: var(--bad); }
+.evnav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.evlink { display: flex; flex-direction: column; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; min-width: 0; }
+.evlink:nth-child(2) { text-align: right; }
+.evlink:hover { border-color: var(--accent); }
+.evlink strong { overflow-wrap: anywhere; font-weight: 600; }
+@media (max-width: 600px) { .evnav { grid-template-columns: minmax(0, 1fr); } .evlink:nth-child(2) { text-align: left; } }
 .names { display: flex; gap: 6px; flex-wrap: wrap; }
 .names span { background: var(--sunk); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; }
 
@@ -554,14 +568,38 @@ const ctrMeta = (list) => `${list.filter((c) => c.state === "running").length} o
 const ctrTable = (list) => `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Status</th><th class="r">Up</th><th class="r">CPU</th><th class="r">Memory</th></tr></thead><tbody>${containerRows(list)}</tbody></table></div>`;
 
 function evRow(e, full) {
-  const time = full ? hm(e.t) : when(e.t);
-  const title = full && e.link ? `<a href="${esc(e.link)}">${esc(e.title)} →</a>` : esc(e.title);
-  const lines = full && e.lines.length
-    ? `<details><summary>${e.cat === "report" ? "Show full report" : "Details"}</summary><ul>${e.lines.map((l) =>
-        `<li class="${l.sev}">${esc(l.text)}</li>`).join("")}</ul></details>` : "";
-  const inner = `<time class="num">${esc(time)}</time><span class="sev ${e.sev}"></span>
-    <div><strong>${title}</strong>${e.body ? `<p>${esc(e.body)}</p>` : ""}${lines}</div>${full ? `<span class="src">${esc(e.src)}</span>` : ""}`;
-  return full ? `<div class="ev">${inner}</div>` : `<a class="ev" href="#activity">${inner}</a>`;
+  return `<a class="ev" href="#event-${esc(e.id)}"><time class="num">${esc(full ? hm(e.t) : when(e.t))}</time><span class="sev ${e.sev}"></span>
+    <div><strong>${esc(e.title)}</strong>${e.body ? `<p>${esc(e.body)}</p>` : ""}</div>${full ? `<span class="src">${esc(e.src)}</span>` : ""}</a>`;
+}
+
+const SEV = { ok: ["All good", "ok"], info: ["Info", "idle"], warn: ["Heads up", "warn"], bad: ["Problem", "bad"] };
+const CAT = { report: "Health report", update: "Update", waiting: "Waiting on you", backup: "Backup", problem: "Problem" };
+const linkLabel = (l) => (l.startsWith("#monitor-") ? "Open the monitor →" : l.startsWith("#container-") ? "Open the container →" : l === "#minecraft" ? "Open the Minecraft page →" : "Open →");
+
+function renderEvent(e) {
+  const [sevText, sevCls] = SEV[e.sev] || SEV.info;
+  const full = new Date(e.t).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  const cmd = ([e.body, ...e.lines.map((l) => l.text)].join("\n").match(/sudo [a-z0-9_-]+(?: [A-Za-z0-9_.@:\/-]+)*/) || [])[0];
+  const groups = e.cat === "report" ? [["bad", "Problems"], ["warn", "Heads up"], ["ok", "Passed"]] : [["", "Details"]];
+  const lists = groups.map(([s, label]) => {
+    const items = e.lines.filter((l) => !s || l.sev === s);
+    return items.length ? `<section class="panel"><div class="panel-head"><h3>${label}</h3><span class="meta num">${items.length}</span></div>
+      <ul class="dots">${items.map((l) => `<li class="${l.sev}">${esc(l.text)}</li>`).join("")}</ul></section>` : "";
+  }).join("");
+  const nav = (x, dir) => (x ? `<a class="evlink" href="#event-${esc(x.id)}"><span class="meta">${dir}</span><strong>${esc(x.title)}</strong><span class="note">${esc(when(x.t))}</span></a>` : "<span></span>");
+  $("view-detail").innerHTML = `<div class="toolbar"><a class="crumb" href="#">← Dashboard</a><span class="note">/</span><a class="crumb" href="#activity">Activity</a></div>
+    <div class="dhead">
+      <div>
+        <h2>${esc(e.title)} <span class="health ${sevCls}"><span class="dot"></span>${sevText}</span></h2>
+        <div class="specs"><span>${esc(full)}</span><span>${esc(ago(e.t))}</span><span>${esc(CAT[e.cat] || e.cat)}</span><span class="num">from ${esc(e.src)}</span></div>
+      </div>
+      ${e.link ? `<div class="toolbar"><a class="btn" href="${esc(e.link)}">${linkLabel(e.link)}</a></div>` : ""}
+    </div>
+    ${e.body ? `<section class="panel"><p class="lead">${esc(e.body)}</p>${cmd ? `<div class="cmdbox"><code id="ev-cmd">${esc(cmd)}</code><button class="btn" type="button" id="ev-copy">Copy</button></div>` : ""}</section>` : ""}
+    ${lists}
+    ${e.raw.length ? `<section class="panel"><div class="panel-head"><h3>Raw log</h3><span class="meta">${e.src === "Uptime Kuma" ? "Uptime Kuma check" : "system journal"}</span></div>
+      <pre class="logs">${e.raw.map((r) => `<span class="ts">${esc(hms(r.t))}</span>  ${esc(r.text)}`).join("\n")}</pre></section>` : ""}
+    <div class="evnav">${nav(e.older, "← Older")}${nav(e.newer, "Newer →")}</div>`;
 }
 
 function waitingHtml(list) {
@@ -1150,6 +1188,7 @@ async function loadDetail(quiet) {
     else if (cur.type === "monitor") renderMonitor(data);
     else if (cur.type === "container") renderContainer(data);
     else if (cur.type === "minecraft") renderMinecraft(data, quiet);
+    else if (cur.type === "event") renderEvent(data);
     else renderActivity(data);
     if (open.length) document.querySelectorAll("#view-detail .ev details").forEach((d) => { if (open.includes(d.closest(".ev").textContent.slice(0, 80))) d.open = true; });
     drawCharts();
@@ -1171,7 +1210,7 @@ async function refreshSummary() {
 
 function route() {
   const h = location.hash.slice(1);
-  const m = h.match(/^(server|monitor|container)-([a-z0-9-]+)$/);
+  const m = h.match(/^(server|monitor|container|event)-([a-z0-9-]+)$/);
   current = h === "activity" || h === "minecraft" ? { type: h } : m ? { type: m[1], key: m[2] } : null;
   detail = null;
   stopConsole();
@@ -1195,6 +1234,15 @@ document.addEventListener("click", (e) => {
   if (fill) { const i = $("mc-input"); i.value = fill.dataset.mcFill; i.focus(); return; }
   if (e.target.id === "mc-yes") { sendCommand(term.pending, true); return; }
   if (e.target.id === "mc-no") { $("mc-confirm").hidden = true; term.pending = null; return; }
+  if (e.target.id === "ev-copy") {
+    const code = $("ev-cmd"), btn = e.target;
+    const done = () => { btn.textContent = "Copied"; setTimeout(() => { btn.textContent = "Copy"; }, 1500); };
+    const select = () => { const r = document.createRange(); r.selectNodeContents(code); const s = getSelection(); s.removeAllRanges(); s.addRange(r); return s; };
+    const fallback = () => { select(); try { if (document.execCommand("copy")) return done(); } catch {} btn.textContent = "Press Ctrl+C"; };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(code.textContent).then(done, fallback);
+    else fallback();   // plain http on the LAN isn't a "secure context", so the clipboard API is missing there
+    return;
+  }
   if (e.target.id === "mc-lock") { postJSON("/api/console/logout", {}).finally(() => loadDetail(false)); }
 });
 window.addEventListener("hashchange", route);
