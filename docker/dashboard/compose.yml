@@ -28,6 +28,9 @@ services:
     environment:
       HOST_IP: 192.168.1.179
       MC_ADDRESS: example.duckdns.org
+      WEATHER_LAT: "40.7479"           # Murray Hill, Manhattan
+      WEATHER_LON: "-73.9757"
+      WEATHER_NAME: Murray Hill, NYC
       TZ: America/New_York
     depends_on: [docker-proxy]
     read_only: true

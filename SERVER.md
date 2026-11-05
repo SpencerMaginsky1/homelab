@@ -356,7 +356,7 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
 | Container state, health, settings, logs, rollback images | Its own `dashboard-docker-proxy` (`CONTAINERS=1`, `IMAGES=1`, `POST=0`) on an internal network only the dashboard can reach |
 | Activity | The system journal (`homelab-healthcheck`, `homelab-updater`, `homelab-watchdog`, `mc-backup`) via `journalctl` (container gets the `adm` group), plus Kuma's down/up alerts |
 | Minecraft | A server-list ping to `192.168.1.179:25565` |
-| Weather (click it in the header for current conditions, a 5-day forecast and the next 24 hours) | Open-Meteo (no key), fetched every 15 min |
+| Weather for **Murray Hill, NYC** (40.7479, -73.9757; `WEATHER_*` in `compose.yml`). Click it in the header for current conditions, a 5-day forecast and the next 24 hours; click a day for its hour-by-hour page (`#weather-day-0`…`4`) | Open-Meteo (no key), fetched every 15 min |
 
 - **Link dots** come from the Uptime Kuma monitor with the same name. Plex shows a hollow dot (not monitored) until a Kuma monitor named **Plex** exists. The docs server isn't linked because it only listens on localhost.
 - **Files:** `~/Desktop/docker/dashboard/`: `app.py` (Python, no extra packages), `index.html`, `Dockerfile` (Ubuntu 26.04, so `journalctl` matches the host's systemd), `compose.yml`, `config.json` (links and shortcuts; edit, then `docker compose restart`). Nothing to back up; it stores no data of its own.

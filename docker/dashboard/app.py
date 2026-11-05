@@ -636,7 +636,8 @@ def forecast():
             "temperature_unit": "fahrenheit", "wind_speed_unit": "mph", "precipitation_unit": "inch",
             "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_gusts_10m,"
                        "wind_direction_10m,pressure_msl,is_day",
-            "hourly": "temperature_2m,precipitation_probability,weather_code", "forecast_hours": 25,
+            "hourly": "temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,"
+                      "wind_speed_10m,relative_humidity_2m,is_day",
             "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,"
                      "wind_speed_10m_max,sunrise,sunset,uv_index_max", "forecast_days": 5})
         with urllib.request.urlopen("https://api.open-meteo.com/v1/forecast?" + q, timeout=10) as r:
@@ -653,7 +654,12 @@ def forecast():
                       "rain_chance": d["precipitation_probability_max"][i], "rain": d["precipitation_sum"][i],
                       "wind": d["wind_speed_10m_max"][i], "sunrise": d["sunrise"][i] * 1000, "sunset": d["sunset"][i] * 1000,
                       "uv": d["uv_index_max"][i]} for i in range(len(d["time"]))],
-            "hourly": {"t": [x * 1000 for x in h["time"]], "temp": h["temperature_2m"], "rain_chance": h["precipitation_probability"]},
+            # every hour of all 5 days (local midnight to midnight); the page picks out a day or the next 24 hours
+            "hourly": {"t": [x * 1000 for x in h["time"]], "temp": h["temperature_2m"], "feels": h["apparent_temperature"],
+                       "rain_chance": h["precipitation_probability"], "rain": h["precipitation"],
+                       "code": h["weather_code"], "group": [wmo_group(x) for x in h["weather_code"]],
+                       "text": [WMO.get(x, "") for x in h["weather_code"]], "wind": h["wind_speed_10m"],
+                       "humidity": h["relative_humidity_2m"], "is_day": h["is_day"]},
         }
     return cached("forecast", 900, load)
 

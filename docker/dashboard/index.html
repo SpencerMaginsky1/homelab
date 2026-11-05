@@ -385,12 +385,26 @@ a.ev:hover strong { color: var(--accent); }
 .wxmeta { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
 .wxmeta .wet { color: var(--accent); font-weight: 600; }
 .wxmeta span { white-space: nowrap; }
+.wxday { border: 1px solid transparent; transition: border-color .15s; }
+a.wxday:hover { border-color: var(--accent); }
+.wxmore { margin-top: auto; }
+.tabs a { font-size: 12.5px; font-weight: 600; color: var(--muted); padding: 5px 12px; border-radius: 6px; }
+.tabs a:hover { color: var(--fg); }
+.tabs a[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
+.dhead h2 .wxi { width: 34px; height: 34px; }
+.wxcell { display: inline-flex; align-items: center; gap: 8px; }
+.wxhours tr.past td { opacity: .45; }
+.wxhours tr.nowrow td { background: var(--accent-soft); }
+.wxhours .wet { color: var(--accent); font-weight: 600; }
+.wxhours td { white-space: nowrap; }
 @media (max-width: 1000px) {
   .wxnow { grid-template-columns: minmax(0, 1fr); }
   .wxdays { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .wxday { display: grid; grid-template-columns: 92px 32px minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 4px 12px;
            background: none; border-radius: 0; padding: 10px 0; border-top: 1px solid var(--line); }
   .wxday:first-child { border-top: 0; }
+  a.wxday:hover { background: var(--sunk); border-color: transparent; border-top-color: var(--line); }
+  .wxday .wxmore { display: none; }
   .wxday .wxi { width: 30px; height: 30px; }
   .wxtext { min-height: 0; }
   .wxmeta { grid-column: 3 / -1; flex-direction: row; flex-wrap: wrap; gap: 2px 12px; }
@@ -398,6 +412,13 @@ a.ev:hover strong { color: var(--accent); }
 @media (max-width: 600px) {
   .wxnow .kv { grid-template-columns: auto minmax(0, 1fr); }
   .wxnow .kv dd:nth-of-type(odd) { margin-right: 0; }
+  .wxhours table { min-width: 0; }
+  .wxhours .col-opt { display: none; }
+  .wxhours td, .wxhours th { padding-left: 3px; padding-right: 3px; }
+  .wxhours .wxcell { gap: 6px; font-size: 12.5px; }
+  .wxhours .pill, .wxhours .amt { display: none; }
+  .wxhours td { font-size: 12.5px; }
+  .wxhours .wxcell { white-space: normal; }
   .wxday { grid-template-columns: 84px 30px minmax(0, 1fr); }
   .wxday .wxrange { grid-column: 3; }
   .wxday .wxtext { grid-column: 3; }
@@ -1323,24 +1344,93 @@ function renderWeather(w) {
       </dl>
     </section>
     <section class="panel">
-      <div class="panel-head"><h3>5-day forecast</h3><span class="meta">high · low · chance of rain</span></div>
-      <div class="wxdays">${w.days.map((d, i) => `<div class="wxday">
+      <div class="panel-head"><h3>5-day forecast</h3><span class="meta">click a day for hour by hour</span></div>
+      <div class="wxdays">${w.days.map((d, i) => `<a class="wxday" href="#weather-day-${i}" aria-label="${esc(dayLabel(d.t, i))}, hour by hour">
         <div class="wxname"><strong>${esc(dayLabel(d.t, i))}</strong><span class="note">${esc(new Date(d.t).toLocaleDateString("en-US", { month: "short", day: "numeric" }))}</span></div>
         ${wxIcon(d.group, 40)}
         <div class="wxtext">${esc(d.text)}</div>
         <div class="wxrange"><span class="num hi">${deg(d.high)}</span><div class="wxbar"><i style="left:${pos(d.low)}%;right:${100 - pos(d.high)}%"></i></div><span class="num lo">${deg(d.low)}</span></div>
         <div class="wxmeta num"><span class="${d.rain_chance >= 50 ? "wet" : ""}">${d.rain_chance ?? 0}% rain${d.rain >= 0.01 ? ` · ${d.rain.toFixed(2)} in` : ""}</span><span>wind ${Math.round(d.wind)} mph</span></div>
-      </div>`).join("")}</div>
+        <span class="more wxmore">Hour by hour →</span>
+      </a>`).join("")}</div>
     </section>
     <div class="charts">${chartPanel("wxtemp", "Next 24 hours: temperature")}${chartPanel("wxrain", "Next 24 hours: chance of rain")}</div>`;
 }
 
+const fmtDeg = (v) => (v == null ? "–" : `${Math.round(v)}°F`);
+const fmtChance = (v) => (v == null ? "–" : `${Math.round(v)}%`);
+const pick = (arr, idx) => idx.map((k) => arr[k]);
+
+// temperature + rain charts for the hours idx of w.hourly, drawn across [t0, t1]
+function weatherCharts(w, idx, t0, t1, prefix, feels) {
+  const h = w.hourly, t = pick(h.t, idx), temp = pick(h.temp, idx), fl = pick(h.feels, idx);
+  const all = [...temp, ...(feels ? fl : [])].filter((v) => v != null);
+  // 4 grid steps of 5° or 10°, so the axis reads 50° 55° 60°... instead of 56° 63° 69°
+  const min = Math.floor((Math.min(...all) - 2) / 5) * 5;
+  const max = min + Math.ceil((Math.max(...all) + 2 - min) / 20) * 20;
+  const series = [{ name: "Temperature", color: "var(--warn)", values: temp }];
+  if (feels) series.push({ name: "Feels like", color: "var(--s2)", values: fl });
+  drawChart(prefix + "temp", t, series, fmtDeg, (v) => `${Math.round(v)}°`, { domain: [t0, t1], min, max });
+  drawChart(prefix + "rain", t, [{ name: "Chance of rain", color: "var(--accent)", values: pick(h.rain_chance, idx) }], fmtChance, (v) => `${Math.round(v)}%`, { domain: [t0, t1], max: 100 });
+}
+
 function chartsWeather(w) {
-  const h = w.hourly, dom = [h.t[0], h.t[h.t.length - 1]];
-  const temps = h.temp.filter((v) => v != null);
-  const min = Math.floor((Math.min(...temps) - 3) / 5) * 5, max = Math.ceil((Math.max(...temps) + 3) / 5) * 5;
-  drawChart("wxtemp", h.t, [{ name: "Temperature", color: "var(--warn)", values: h.temp }], (v) => (v == null ? "–" : `${Math.round(v)}°F`), (v) => `${Math.round(v)}°`, { domain: dom, min, max });
-  drawChart("wxrain", h.t, [{ name: "Chance of rain", color: "var(--accent)", values: h.rain_chance }], (v) => (v == null ? "–" : `${Math.round(v)}%`), (v) => `${Math.round(v)}%`, { domain: dom, max: 100 });
+  const now = Date.now(), h = w.hourly;
+  const idx = h.t.map((_, k) => k).filter((k) => h.t[k] >= now - 3600e3 && h.t[k] <= now + 24 * 3600e3);
+  if (idx.length) weatherCharts(w, idx, h.t[idx[0]], h.t[idx[idx.length - 1]], "wx", false);
+}
+
+function dayHours(w, i) {
+  const start = w.days[i].t, end = w.days[i + 1] ? w.days[i + 1].t : start + 86400e3;
+  return { start, end, idx: w.hourly.t.map((_, k) => k).filter((k) => w.hourly.t[k] >= start && w.hourly.t[k] < end) };
+}
+
+function renderWeatherDay(w, i) {
+  const d = w.days[i];
+  if (!d) { $("view-detail").innerHTML = `${crumb}<p class="empty">There's no forecast for that day.</p>`; return; }
+  const h = w.hourly, { idx } = dayHours(w, i), now = Date.now();
+  const date = new Date(d.t).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  const dayTabs = `<div class="tabs" role="tablist" aria-label="Day">${w.days.map((x, j) =>
+    `<a role="tab" href="#weather-day-${j}" aria-selected="${j === i}">${esc(j === 0 ? "Today" : new Date(x.t).toLocaleDateString("en-US", { weekday: "short" }))}</a>`).join("")}</div>`;
+  const rows = idx.map((k) => {
+    const t = h.t[k], cls = t + 3600e3 <= now ? "past" : t <= now ? "nowrow" : "";
+    return `<tr class="${cls}"><td class="num">${esc(hm(t))}${cls === "nowrow" ? ` <span class="pill run">now</span>` : ""}</td>
+      <td><span class="wxcell">${wxIcon(h.group[k], 22, !h.is_day[k])}${esc(h.text[k])}</span></td>
+      <td class="r num"><b>${fmtDeg(h.temp[k])}</b></td><td class="r num col-opt">${fmtDeg(h.feels[k])}</td>
+      <td class="r num ${h.rain_chance[k] >= 50 ? "wet" : ""}">${fmtChance(h.rain_chance[k])}${h.rain[k] >= 0.01 ? `<span class="amt"> · ${h.rain[k].toFixed(2)} in</span>` : ""}</td>
+      <td class="r num">${Math.round(h.wind[k])} mph</td><td class="r num col-opt">${h.humidity[k]}%</td></tr>`;
+  }).join("");
+  const nav = (j, dir) => (w.days[j] ? `<a class="evlink" href="#weather-day-${j}"><span class="meta">${dir}</span><strong>${esc(dayLabel(w.days[j].t, j))}</strong><span class="note">${esc(w.days[j].text)} · ${deg(w.days[j].high)} / ${deg(w.days[j].low)}</span></a>` : "<span></span>");
+  $("view-detail").innerHTML = `<div class="toolbar"><a class="crumb" href="#">← Dashboard</a><span class="note">/</span><a class="crumb" href="#weather">Weather</a></div>
+    <div class="dhead">
+      <div>
+        <h2>${wxIcon(d.group, 34)} ${esc(dayLabel(d.t, i))}</h2>
+        <div class="specs"><span>${esc(date)}</span><span>${esc(d.text)}</span><span>${esc(w.place)}</span></div>
+      </div>
+      <div class="dtools">${dayTabs}</div>
+    </div>
+    <div class="stats">
+      ${tile("High", deg(d.high), "", "")}
+      ${tile("Low", deg(d.low), "", "")}
+      ${tile("Chance of rain", `${d.rain_chance ?? 0}%`, d.rain >= 0.01 ? `${d.rain.toFixed(2)} in expected` : "no rain expected", d.rain_chance >= 50 ? "warn" : "")}
+      ${tile("Wind", `${Math.round(d.wind)} mph`, "top speed")}
+      ${tile("Sunrise", hm(d.sunrise), `sunset ${hm(d.sunset)}`)}
+      ${tile("UV index", d.uv != null ? d.uv.toFixed(1) : "–", d.uv >= 6 ? "high: wear sunscreen" : d.uv >= 3 ? "moderate" : "low")}
+    </div>
+    <div class="charts">${chartPanel("wdtemp", "Temperature")}${chartPanel("wdrain", "Chance of rain")}</div>
+    <section class="panel">
+      <div class="panel-head"><h3>Hour by hour</h3><span class="meta">${idx.length} hours</span></div>
+      <div class="table-wrap wxhours"><table>
+        <thead><tr><th>Time</th><th>Conditions</th><th class="r">Temp</th><th class="r col-opt">Feels like</th><th class="r">Rain</th><th class="r">Wind</th><th class="r col-opt">Humidity</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+    </section>
+    <div class="evnav">${nav(i - 1, "← Previous day")}${nav(i + 1, "Next day →")}</div>`;
+}
+
+function chartsWeatherDay(w, i) {
+  if (!w.days[i]) return;
+  const { start, end, idx } = dayHours(w, i);
+  weatherCharts(w, idx, start, end, "wd", true);
 }
 
 /* ---------- loading and routing ---------- */
@@ -1351,12 +1441,14 @@ function drawCharts() {
   else if (current.type === "monitor") chartsMonitor(detail);
   else if (current.type === "container") chartsContainer(detail);
   else if (current.type === "weather") chartsWeather(detail);
+  else if (current.type === "weatherday") chartsWeatherDay(detail, current.key);
 }
 
 async function loadDetail(quiet) {
   const cur = current;
   if (!cur) return;
-  const path = ["activity", "minecraft", "weather"].includes(cur.type) ? `/api/${cur.type}` : `/api/${cur.type}/${cur.key}?range=${range}`;
+  const path = ["activity", "minecraft", "weather"].includes(cur.type) ? `/api/${cur.type}` : cur.type === "weatherday" ? "/api/weather"
+    : `/api/${cur.type}/${cur.key}?range=${range}`;
   if (!quiet) { $("view-detail").innerHTML = `${crumb}<p class="loading">Loading…</p>`; detailSig = ""; }
   try {
     const data = await api(path);
@@ -1371,6 +1463,7 @@ async function loadDetail(quiet) {
     else if (cur.type === "minecraft") renderMinecraft(data, quiet);
     else if (cur.type === "event") renderEvent(data);
     else if (cur.type === "weather") renderWeather(data);
+    else if (cur.type === "weatherday") renderWeatherDay(data, cur.key);
     else renderActivity(data);
     if (open.length) document.querySelectorAll("#view-detail .ev details").forEach((d) => { if (open.includes(d.closest(".ev").textContent.slice(0, 80))) d.open = true; });
     drawCharts();
@@ -1393,7 +1486,9 @@ async function refreshSummary() {
 function route() {
   const h = location.hash.slice(1);
   const m = h.match(/^(server|monitor|container|event)-([a-z0-9-]+)$/);
-  current = ["activity", "minecraft", "weather"].includes(h) ? { type: h } : m ? { type: m[1], key: m[2] } : null;
+  const wd = h.match(/^weather-day-([0-4])$/);
+  current = ["activity", "minecraft", "weather"].includes(h) ? { type: h } : wd ? { type: "weatherday", key: +wd[1] }
+    : m ? { type: m[1], key: m[2] } : null;
   detail = null;
   stopConsole();
   const tab = !current ? "home" : current.type === "server" ? "server" : current.type === "minecraft" ? "minecraft"
