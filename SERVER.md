@@ -133,7 +133,7 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
 | GolfApp | HTTP | `http://127.0.0.1:8001` (added 2026-10-17) |
 | Ship Tracker | HTTP | `http://127.0.0.1:8100/health` (added 2026-10-19; goes down if the ship feed stops, not only the page) |
 
-- Status page: **`/status/home`**, which feeds the Homarr widget. It has all 7 monitors (2026-10-19). **When you add a monitor, also add it to this status page** or it won't show up in Homarr.
+- Status page: **`/status/home`**, which feeds the Homarr widget. It has all 9 monitors (Dashboard and Plex added 2026-11-05). **When you add a monitor, also add it to this status page** or it won't show up in Homarr.
 - Because it uses host networking, local services are checked at `127.0.0.1`.
 - If the Pi's ISP changes its WAN IP, "Traffic via PI" will go red. Update the keyword when that happens.
 - **Notifications:** "Phone (ntfy)" is on for **all monitors** and is "Default enabled", so new monitors get it too. It uses the same private topic as the health check (see 3.6). It pushes once when a monitor goes **down** (after 3 failed checks, about 3 min, because retries = 2) and once when it comes back **up**. It's silent while healthy. Test it from Settings → Notifications → Phone (ntfy) → Test.
