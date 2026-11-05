@@ -1,0 +1,961 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Spencer-Server</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: status bar → launcher strip → two-row 12-col grid (servers | uptime, containers | minecraft + activity). Servers, monitors, containers and activity each open a detail view (#server-*, #monitor-*, #container-*, #activity); stacks to one column on phones */
+:root {
+  --bg: #eef1f4;
+  --surface: #ffffff;
+  --sunk: #f5f7f9;
+  --line: #dde3e9;
+  --fg: #16202b;
+  --muted: #5d6b79;
+  --faint: #8794a1;
+  --accent: #3b6fd8;
+  --accent-soft: #e5edfb;
+  --s2: #8a5cf0;
+  --s3: #0f8f86;
+  --ok: #1f9d63;
+  --ok-soft: #dcf3e8;
+  --warn: #c98a06;
+  --warn-soft: #fbf0d4;
+  --bad: #d4453b;
+  --bad-soft: #fbe2df;
+  --track: #e4e9ee;
+  --tip: #16202b;
+  --tip-fg: #f4f7fa;
+  --font-ui: "Instrument Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-data: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 10px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1318; --surface: #151c23; --sunk: #11171d; --line: #232d37;
+    --fg: #e4eaf0; --muted: #93a1ae; --faint: #66737f;
+    --accent: #7ea6f5; --accent-soft: #1b2a44; --s2: #b49bfa; --s3: #4fcfc3;
+    --ok: #3fc489; --ok-soft: #12301f; --warn: #e5b23a; --warn-soft: #3a2d0d;
+    --bad: #f0675d; --bad-soft: #3d1715; --track: #222c36;
+    --tip: #e4eaf0; --tip-fg: #0e1318;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: var(--font-ui); font-size: 14px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: max(20px, env(safe-area-inset-top, 0px)) max(40px, env(safe-area-inset-bottom, 0px));
+}
+[hidden] { display: none !important; }
+.wrap { max-width: 1320px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.view { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+a { color: inherit; text-decoration: none; }
+a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+
+/* banners */
+.banner { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; border-radius: var(--r); padding: 10px 14px; }
+.banner.bad { background: var(--bad-soft); color: var(--bad); }
+.banner.warn { background: var(--warn-soft); color: var(--warn); }
+.banner ul { margin: 0; padding-left: 18px; }
+
+/* status bar */
+.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.host { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.host h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+.host h1 a:hover { color: var(--accent); }
+.health {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--ok-soft); color: var(--ok); font-weight: 600; font-size: 13px;
+  padding: 5px 12px 5px 10px; border-radius: 999px; letter-spacing: 0; white-space: nowrap;
+}
+.health.warn { background: var(--warn-soft); color: var(--warn); }
+.health.bad { background: var(--bad-soft); color: var(--bad); }
+.health.idle { background: var(--sunk); color: var(--muted); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+.summary { color: var(--muted); font-size: 13px; }
+.summary span + span::before { content: "·"; margin: 0 8px; color: var(--faint); }
+.clock { display: flex; align-items: baseline; gap: 14px; color: var(--muted); flex-wrap: wrap; }
+.clock .time { font-size: 22px; color: var(--fg); font-weight: 500; }
+
+/* launcher */
+.launch {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px;
+}
+.group { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; min-width: 0; }
+.group-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); font-weight: 600; padding: 0 6px 0 4px; }
+.link {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 11px; border-radius: 8px; font-weight: 500; font-size: 13.5px;
+  border: 1px solid transparent; transition: background .15s, border-color .15s;
+}
+.link:hover { background: var(--sunk); border-color: var(--line); }
+.link .dot { width: 7px; height: 7px; color: var(--faint); }
+.link .dot.up { color: var(--ok); } .link .dot.down { color: var(--bad); } .link .dot.pending { color: var(--warn); }
+.link .dot.unknown { background: transparent; border: 1.5px solid var(--faint); }
+.link .port { font-family: var(--font-data); font-size: 11px; color: var(--faint); }
+.link .glyph {
+  width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700; flex: none;
+}
+.shortcuts { border-left: 1px solid var(--line); padding-left: 12px; }
+
+/* panels */
+.grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
+.panel {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+  padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0;
+}
+.span-7 { grid-column: span 7; } .span-5 { grid-column: span 5; }
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.panel-head h2, .panel-head h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.panel-head .meta { font-size: 12px; color: var(--muted); }
+.panel-head a.meta:hover { color: var(--accent); }
+.panel-head a.meta.go { color: var(--accent); font-weight: 600; }
+.stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.note { font-size: 12px; color: var(--muted); margin: 0; }
+code { font-family: var(--font-data); font-size: 11.5px; background: var(--sunk); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+
+/* servers */
+.machines { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.machine {
+  background: var(--sunk); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0;
+  border: 1px solid transparent; transition: border-color .15s;
+}
+a.machine:hover { border-color: var(--accent); }
+.machine-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.machine-head > div { min-width: 0; }
+.machine-head strong { font-size: 14px; }
+.machine-head .sub { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.more { font-size: 12px; color: var(--accent); font-weight: 600; white-space: nowrap; }
+.meters { display: grid; gap: 9px; }
+.meter { display: grid; grid-template-columns: 44px minmax(0, 1fr) 88px; gap: 10px; align-items: center; font-size: 12.5px; }
+.meter .k { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.meter .v { text-align: right; font-size: 12px; }
+.bar { height: 6px; background: var(--track); border-radius: 4px; overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+.bar i.warn { background: var(--warn); } .bar i.bad { background: var(--bad); }
+.spark { display: flex; flex-direction: column; gap: 4px; }
+.spark .k { font-size: 11px; color: var(--faint); display: flex; justify-content: space-between; }
+.spark svg { width: 100%; height: 40px; display: block; }
+
+/* uptime */
+.monitors { display: flex; flex-direction: column; }
+.mon {
+  display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) 62px; gap: 12px; align-items: center;
+  padding: 9px 8px; margin: 0 -8px; border-top: 1px solid var(--line); border-radius: 6px;
+}
+.mon:first-child { border-top-color: transparent; }
+a.mon:hover { background: var(--sunk); }
+a.mon:hover .mon-name span { color: var(--accent); }
+.mon-name { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: 500; }
+.mon-name span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-1 { color: var(--ok); } .st-0 { color: var(--bad); } .st-2 { color: var(--warn); } .st-3, .st-null { color: var(--faint); }
+.beats { display: flex; gap: 2px; height: 18px; }
+.beats i { flex: 1; border-radius: 2px; background: var(--ok); opacity: .85; }
+.beats i.b0 { background: var(--bad); opacity: 1; } .beats i.b2 { background: var(--warn); opacity: 1; }
+.beats i.b3 { background: var(--faint); } .beats i.none { background: var(--track); opacity: 1; }
+.beats.big { height: 36px; gap: 1px; }
+.pct { text-align: right; font-size: 12.5px; }
+.pct.dim { color: var(--muted); }
+.legend { display: flex; justify-content: space-between; font-size: 11px; color: var(--faint); gap: 12px; }
+
+/* tables */
+.table-wrap { overflow-x: auto; margin: 0 -4px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 520px; }
+th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); font-weight: 600; padding: 0 4px 8px; }
+td { padding: 7px 4px; border-top: 1px solid var(--line); vertical-align: middle; }
+tr.stack-row td { padding-top: 12px; font-size: 11px; color: var(--muted); font-weight: 600; border-top: 0; }
+tr[data-href] { cursor: pointer; }
+tr[data-href]:hover td { background: var(--sunk); }
+tr[data-href]:hover .cname a { color: var(--accent); }
+td.r, th.r { text-align: right; }
+.cname { font-family: var(--font-data); font-size: 12.5px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.pill.run { background: var(--accent-soft); color: var(--accent); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.bad { background: var(--bad-soft); color: var(--bad); }
+.pill .dot { width: 6px; height: 6px; }
+.ram { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.ram .bar { width: 64px; height: 5px; }
+.hot { color: var(--warn); font-weight: 500; }
+.empty { color: var(--muted); font-size: 13px; padding: 8px 0; margin: 0; }
+
+/* minecraft */
+.mc { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: center; }
+.mc-count { font-size: 34px; font-weight: 600; line-height: 1; }
+.mc-count small { font-size: 16px; color: var(--muted); font-weight: 400; }
+.kv { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 14px; font-size: 12.5px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+
+/* activity */
+.feed { display: flex; flex-direction: column; }
+.ev { display: grid; grid-template-columns: 70px 4px minmax(0, 1fr) auto; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+.feed > .ev:first-child, .day > .ev:first-of-type { border-top: 0; }
+a.ev:hover strong { color: var(--accent); }
+.ev time { font-size: 12px; color: var(--muted); padding-top: 1px; }
+.ev .sev { border-radius: 2px; background: var(--ok); }
+.ev .sev.warn { background: var(--warn); } .ev .sev.bad { background: var(--bad); } .ev .sev.info { background: var(--accent); }
+.ev strong { display: block; font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+.ev strong a:hover { color: var(--accent); }
+.ev p { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.src { font-size: 11px; color: var(--muted); background: var(--sunk); border-radius: 999px; padding: 2px 8px; white-space: nowrap; align-self: start; font-family: var(--font-data); }
+.ev details { margin-top: 6px; }
+.ev summary { font-size: 12px; color: var(--accent); cursor: pointer; font-weight: 600; width: fit-content; }
+.ev ul { margin: 6px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: 12.5px; display: grid; gap: 3px; }
+.ev li { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 8px; align-items: baseline; overflow-wrap: anywhere; }
+.ev li::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); transform: translateY(-1px); }
+.ev li.warn::before { background: var(--warn); } .ev li.bad::before { background: var(--bad); }
+.waiting { display: flex; flex-direction: column; gap: 6px; }
+.waiting:empty { display: none; }
+.waiting a { display: block; background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 8px 12px; font-size: 12.5px; }
+.waiting a b { font-weight: 600; }
+.waiting code { background: transparent; padding: 0; color: inherit; }
+.day { display: flex; flex-direction: column; }
+.day h3 { margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); font-weight: 600; }
+.days { display: flex; flex-direction: column; gap: 22px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+  font: inherit; font-size: 12.5px; font-weight: 600; color: var(--muted); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center;
+}
+.chip:hover { color: var(--fg); }
+.chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.chip .num { font-size: 11px; opacity: .8; }
+
+/* detail views */
+.crumb { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); font-weight: 500; width: fit-content; }
+.crumb:hover { color: var(--accent); }
+.dhead { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.dhead > div:first-child { min-width: 0; }
+.dhead h2 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.01em; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; overflow-wrap: anywhere; }
+.dhead h2.mono { font-family: var(--font-data); font-weight: 500; font-size: 22px; }
+.specs { color: var(--muted); font-size: 13px; margin-top: 4px; overflow-wrap: anywhere; }
+.specs span + span::before { content: "·"; margin: 0 8px; color: var(--faint); }
+.dtools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dtools > a { font-size: 12px; color: var(--muted); }
+.dtools > a:hover { color: var(--accent); }
+.tabs { display: inline-flex; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 3px; gap: 2px; }
+.tabs button { font: inherit; font-size: 12.5px; font-weight: 600; color: var(--muted); background: none; border: 0; padding: 5px 12px; border-radius: 6px; cursor: pointer; }
+.tabs button:hover { color: var(--fg); }
+.tabs button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
+.stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.stats.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; min-width: 0; }
+.stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); font-weight: 600; }
+.stat .v { font-size: 22px; font-weight: 500; margin-top: 4px; line-height: 1.2; overflow-wrap: anywhere; }
+.stat .v.warn { color: var(--warn); } .stat .v.bad { color: var(--bad); } .stat .v.ok { color: var(--ok); }
+.stat .s { font-size: 12px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+.charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.keys { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.keys span { display: inline-flex; align-items: center; gap: 6px; }
+.keys i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+.keys b { color: var(--fg); font-weight: 500; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.chart { position: relative; height: 180px; touch-action: pan-y; }
+.chart.tall { height: 220px; }
+.chart svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.chart text { font-family: var(--font-data); font-size: 10.5px; fill: var(--faint); }
+.tip {
+  position: absolute; top: 4px; pointer-events: none; z-index: 2;
+  background: var(--tip); color: var(--tip-fg); border-radius: 7px; padding: 7px 9px;
+  font-size: 12px; line-height: 1.5; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.18);
+}
+.tip .t { opacity: .7; font-size: 11px; }
+.tip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+.tip .num { margin-left: 8px; }
+.logs {
+  margin: 0; font-family: var(--font-data); font-size: 12px; line-height: 1.6; background: var(--sunk);
+  border-radius: 8px; padding: 12px 14px; overflow: auto; max-height: 420px; color: var(--fg); white-space: pre;
+}
+.logs .ts { color: var(--faint); }
+.logs .err { color: var(--warn); }
+.rb { display: flex; flex-direction: column; }
+.rb div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 12.5px; }
+.rb div:first-child { border-top: 0; padding-top: 0; }
+.rb .num { color: var(--muted); }
+.loading { color: var(--muted); padding: 40px 0; text-align: center; }
+
+@media (max-width: 1000px) {
+  .span-7, .span-5 { grid-column: 1 / -1; }
+  .launch { grid-template-columns: minmax(0, 1fr); }
+  .shortcuts { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 10px; }
+  .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stats.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .charts { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .machines { grid-template-columns: minmax(0, 1fr); }
+  .mon { grid-template-columns: minmax(0, 1fr) 62px; }
+  .mon .beats { grid-column: 1 / -1; grid-row: 2; }
+  .clock .time { font-size: 18px; }
+  .link .port { display: none; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ev { grid-template-columns: 58px 4px minmax(0, 1fr); }
+  .ev .src { grid-column: 3; grid-row: 2; width: fit-content; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="banner bad" id="offline" hidden>Can't reach the dashboard backend. Retrying every 15 seconds.</div>
+
+  <header class="top">
+    <div class="host">
+      <h1><a href="#">Spencer-Server</a></h1>
+      <span class="health idle" id="health"><span class="dot"></span>Loading…</span>
+      <div class="summary num" id="summary"></div>
+    </div>
+    <div class="clock">
+      <span id="wx"></span>
+      <span class="time num" id="time"></span>
+      <span id="date"></span>
+    </div>
+  </header>
+
+  <div class="banner" id="alerts" hidden></div>
+
+  <div class="view" id="view-home">
+    <nav class="launch" aria-label="Quick links">
+      <div class="group" id="apps"><span class="group-label">Server</span></div>
+      <div class="group shortcuts" id="shortcuts"><span class="group-label">Shortcuts</span></div>
+    </nav>
+
+    <main class="grid">
+      <section class="panel span-7">
+        <div class="panel-head"><h2>Servers</h2><span class="meta">Click a server for details</span></div>
+        <div class="machines" id="machines"><p class="empty">Loading…</p></div>
+      </section>
+
+      <section class="panel span-5">
+        <div class="panel-head"><h2>Uptime</h2><a class="meta" id="kuma-link" target="_blank" rel="noopener">Open Uptime Kuma →</a></div>
+        <div class="monitors" id="monitors"></div>
+        <div class="legend"><span>last 30 checks · click a monitor for details</span><span>24 h uptime</span></div>
+      </section>
+
+      <section class="panel span-7">
+        <div class="panel-head"><h2>Containers</h2><span class="meta num" id="ctr-meta"></span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Name</th><th>Status</th><th class="r">Up</th><th class="r">CPU</th><th class="r">Memory</th></tr></thead>
+            <tbody id="containers"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="stack span-5">
+        <section class="panel">
+          <div class="panel-head"><h2>Minecraft</h2><span class="meta" id="mc-state"></span></div>
+          <div class="mc" id="mc"></div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>Activity</h2><a class="meta go" href="#activity">See all →</a></div>
+          <div class="waiting" id="waiting"></div>
+          <div class="feed" id="feed"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="view" id="view-detail" hidden></div>
+</div>
+
+<script>
+const RANGES = {
+  "1h": { label: "1 h", span: 3600e3 },
+  "12h": { label: "12 h", span: 12 * 3600e3 },
+  "24h": { label: "24 h", span: 24 * 3600e3 },
+  "7d": { label: "7 days", span: 7 * 86400e3 },
+};
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const level = (pct, warn = 70, bad = 90) => (pct >= bad ? "bad" : pct >= warn ? "warn" : "");
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+const appUrl = (port, path = "") => `${location.protocol}//${location.hostname}:${port}${path}`;
+
+let S = null;            // last /api/summary
+let current = null;      // { type, key } for the open detail view
+let detail = null;       // last detail payload
+let detailSig = "";
+let range = RANGES[store.get("range")] ? store.get("range") : "24h";
+let actFilter = "all";
+
+async function api(path) {
+  const r = await fetch(path, { cache: "no-store" });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+
+/* ---------- formatting ---------- */
+
+const n1 = (v) => (v == null ? "–" : v < 10 ? v.toFixed(1) : v.toFixed(0));
+const fmtPct = (v) => (v == null ? "–" : `${v < 1 ? v.toFixed(2) : n1(v)}%`);
+const fmtGB = (v) => (v == null ? "–" : `${n1(v)} GB`);
+const fmtMB = (v) => (v == null ? "–" : v >= 1024 ? `${(v / 1024).toFixed(2)} GB` : `${v.toFixed(v < 10 ? 1 : 0)} MB`);
+const fmtMs = (v) => (v == null ? "–" : `${v < 10 ? v.toFixed(1) : Math.round(v)} ms`);
+const fmtUptime = (v) => (v == null ? "–" : v === 100 ? "100%" : `${v.toFixed(2)}%`);
+function fmtRate(b) {
+  if (b == null) return "–";
+  if (b < 1000) return `${Math.round(b)} B/s`;
+  if (b < 1e6) return `${(b / 1e3).toFixed(b < 1e4 ? 1 : 0)} kB/s`;
+  return `${(b / 1e6).toFixed(1)} MB/s`;
+}
+function fmtBytes(b) {
+  if (b == null) return "–";
+  const u = ["B", "kB", "MB", "GB", "TB"]; let i = 0;
+  while (b >= 1000 && i < u.length - 1) { b /= 1000; i++; }
+  return `${b.toFixed(b < 10 && i ? 1 : 0)} ${u[i]}`;
+}
+function fmtDur(sec) {
+  if (sec == null) return "–";
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 90) return `${sec} s`;
+  if (sec < 5400) return `${Math.round(sec / 60)} min`;
+  if (sec < 172800) return `${Math.floor(sec / 3600)} h ${Math.floor((sec % 3600) / 60)} min`;
+  return `${Math.floor(sec / 86400)} d ${Math.floor((sec % 86400) / 3600)} h`;
+}
+const hm = (ms) => new Date(ms).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+const hms = (ms) => new Date(ms).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+function dayName(ms) {
+  const d = new Date(ms), t = new Date();
+  const y = new Date(); y.setDate(t.getDate() - 1);
+  if (d.toDateString() === t.toDateString()) return "Today";
+  if (d.toDateString() === y.toDateString()) return "Yesterday";
+  return d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+}
+const shortDay = (ms) => { const n = dayName(ms); return n.includes(",") ? new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : n; };
+const when = (ms) => (ms ? `${shortDay(ms)} ${hm(ms)}` : "–");
+const ago = (ms) => (ms ? `${fmtDur((Date.now() - ms) / 1000)} ago` : "–");
+
+/* ---------- shared bits ---------- */
+
+const crumb = `<a class="crumb" href="#">← Dashboard</a>`;
+const tile = (k, v, s, cls = "") => `<div class="stat"><div class="k">${k}</div><div class="v num ${cls}">${esc(v)}</div><div class="s">${esc(s)}</div></div>`;
+const chartPanel = (key, title, tall) => `<section class="panel"><div class="panel-head"><h3>${title}</h3><div class="keys" id="k-${key}"></div></div><div class="chart${tall ? " tall" : ""}" id="c-${key}"></div></section>`;
+const tabs = () => `<div class="tabs" role="tablist" aria-label="Time range">${Object.entries(RANGES).map(([r, o]) =>
+  `<button type="button" role="tab" data-range="${r}" aria-selected="${r === range}">${o.label}</button>`).join("")}</div>`;
+const STATUS = { 1: ["Up", "ok"], 0: ["Down", "bad"], 2: ["Failing checks", "warn"], 3: ["Maintenance", "run"] };
+const statusPill = (s) => { const [t, c] = STATUS[s] || ["Unknown", "run"]; return `<span class="health ${c === "run" ? "idle" : c}"><span class="dot"></span>${t}</span>`; };
+
+function meter(k, pct, label, cls) {
+  return `<div class="meter"><span class="k">${k}</span><div class="bar"><i class="${cls}" style="width:${Math.max(0, Math.min(100, pct || 0))}%"></i></div><span class="v num">${label}</span></div>`;
+}
+
+function spark(values) {
+  if (!values || values.length < 2) return `<p class="note">No recent data.</p>`;
+  const w = 240, h = 40, max = Math.max(20, ...values);
+  const step = w / (values.length - 1);
+  const pts = values.map((v, i) => [i * step, h - 2 - (v / max) * (h - 6)]);
+  const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  const last = pts[pts.length - 1];
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+    <line x1="0" x2="${w}" y1="${h - 2}" y2="${h - 2}" stroke="var(--line)" stroke-width="1"/>
+    <path d="${line} L${w} ${h - 2} L0 ${h - 2} Z" fill="var(--accent-soft)"/>
+    <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.6" vector-effect="non-scaling-stroke"/>
+    <circle cx="${last[0] - 2}" cy="${last[1]}" r="2.5" fill="var(--accent)"/>
+  </svg>`;
+}
+
+function healthPill(c) {
+  const map = { healthy: ["ok", "healthy"], running: ["run", "running"], starting: ["warn", "starting"], unhealthy: ["bad", "unhealthy"] };
+  const [cls, text] = map[c.health] || ["bad", c.state];
+  return `<span class="pill ${cls}"><span class="dot"></span>${esc(text)}</span>`;
+}
+
+function containerRows(list) {
+  let lastStack = "";
+  return list.map((c) => {
+    const head = c.stack !== lastStack ? `<tr class="stack-row"><td colspan="5">${esc(c.stack)}</td></tr>` : "";
+    lastStack = c.stack;
+    const memPct = c.mem != null ? (c.mem / (c.limit || 2048)) * 100 : 0;
+    const href = "#container-" + c.slug;
+    return head + `<tr data-href="${href}">
+      <td class="cname"><a href="${href}">${esc(c.name)}</a></td><td>${healthPill(c)}</td>
+      <td class="r num">${c.started ? fmtDur((Date.now() - c.started) / 1000) : esc(c.state)}</td>
+      <td class="r num ${c.cpu >= 20 ? "hot" : ""}">${fmtPct(c.cpu)}</td>
+      <td class="r"><div class="ram"><span class="num">${fmtMB(c.mem)}</span><div class="bar"><i class="${level(memPct, 75, 90)}" style="width:${Math.max(2, Math.min(100, memPct))}%"></i></div></div></td>
+    </tr>`;
+  }).join("");
+}
+const ctrMeta = (list) => `${list.filter((c) => c.state === "running").length} of ${list.length} running · ${fmtMB(list.reduce((s, c) => s + (c.mem || 0), 0))} RAM`;
+const ctrTable = (list) => `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Status</th><th class="r">Up</th><th class="r">CPU</th><th class="r">Memory</th></tr></thead><tbody>${containerRows(list)}</tbody></table></div>`;
+
+function evRow(e, full) {
+  const time = full ? hm(e.t) : when(e.t);
+  const title = full && e.link ? `<a href="${esc(e.link)}">${esc(e.title)} →</a>` : esc(e.title);
+  const lines = full && e.lines.length
+    ? `<details><summary>${e.cat === "report" ? "Show full report" : "Details"}</summary><ul>${e.lines.map((l) =>
+        `<li class="${l.sev}">${esc(l.text)}</li>`).join("")}</ul></details>` : "";
+  const inner = `<time class="num">${esc(time)}</time><span class="sev ${e.sev}"></span>
+    <div><strong>${title}</strong>${e.body ? `<p>${esc(e.body)}</p>` : ""}${lines}</div>${full ? `<span class="src">${esc(e.src)}</span>` : ""}`;
+  return full ? `<div class="ev">${inner}</div>` : `<a class="ev" href="#activity">${inner}</a>`;
+}
+
+function waitingHtml(list) {
+  return list.map((w) => `<a href="${esc(w.link || "#activity")}"><b>Update waiting for you: ${esc(w.svc)}.</b> ${esc(w.body.replace(/\. Run (.*)$/, ""))}. Run <code>sudo homelab-updater apply ${esc(w.svc)}</code></a>`).join("");
+}
+
+/* ---------- header and home ---------- */
+
+function renderTop() {
+  const h = S.health;
+  $("health").className = `health ${h.level}`;
+  $("health").innerHTML = `<span class="dot"></span>${esc(h.text)}`;
+  const running = S.containers.filter((c) => c.state === "running").length;
+  const up = S.monitors.filter((m) => m.status === 1).length;
+  $("summary").innerHTML = `<span>${running}/${S.containers.length} containers</span><span>${up}/${S.monitors.length} monitors up</span>${S.uptime ? `<span>up ${fmtDur(S.uptime)}</span>` : ""}`;
+  const w = S.weather;
+  $("wx").innerHTML = w ? `<span class="num">${w.temp}°F</span> ${esc(w.text.toLowerCase())}, ${esc(w.place)}` : "";
+  const errs = Object.entries(S.errors || {});
+  const items = h.items.filter((x) => x !== "Some data couldn't be loaded");
+  const al = $("alerts");
+  if (items.length || errs.length) {
+    al.className = `banner ${h.level === "bad" ? "bad" : "warn"}`;
+    al.innerHTML = `<ul>${items.map((x) => `<li>${esc(x)}</li>`).join("")}${errs.map(([k, v]) => `<li>Couldn't load ${esc(k)}: ${esc(v)}</li>`).join("")}</ul>`;
+    al.hidden = false;
+  } else al.hidden = true;
+}
+
+function tickClock() {
+  const d = new Date();
+  $("time").textContent = hm(d);
+  $("date").textContent = d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+}
+
+function renderHome() {
+  $("apps").innerHTML = `<span class="group-label">Server</span>` + S.apps.map((a) => {
+    const tip = { up: "up", down: "down", pending: "failing checks", unknown: "not monitored", maintenance: "maintenance" }[a.state];
+    return `<a class="link" href="${esc(appUrl(a.port, a.path))}" target="_blank" rel="noopener" title="${esc(a.name)}: ${tip}"><span class="dot ${a.state}"></span>${esc(a.name)}<span class="port">:${a.port}</span></a>`;
+  }).join("");
+  $("shortcuts").innerHTML = `<span class="group-label">Shortcuts</span>` + S.shortcuts.map((s) =>
+    `<a class="link" href="${esc(s.url)}" target="_blank" rel="noopener"><span class="glyph">${esc(s.glyph)}</span>${esc(s.name)}</a>`).join("");
+  $("kuma-link").href = appUrl(3001);
+
+  $("machines").innerHTML = S.machines.map((m) => {
+    const ramPct = m.ram[1] ? (m.ram[0] / m.ram[1]) * 100 : 0, diskPct = m.disk[1] ? (m.disk[0] / m.disk[1]) * 100 : 0;
+    return `<a class="machine" href="#server-${m.id}" aria-label="${esc(m.name)} details">
+      <div class="machine-head"><div><strong>${esc(m.name)}</strong><div class="sub">${esc(m.os)} · ${esc(m.cpu_model)}</div></div>
+        <span class="more">${m.status !== "up" ? `<span class="pill bad">${esc(m.status)}</span> ` : ""}Details →</span></div>
+      <div class="meters">
+        ${meter("CPU", m.cpu, fmtPct(m.cpu), level(m.cpu))}
+        ${meter("RAM", ramPct, `${n1(m.ram[0])} / ${n1(m.ram[1])} GB`, level(ramPct, 80, 92))}
+        ${meter("Disk", diskPct, `${n1(m.disk[0])} / ${Math.round(m.disk[1])} GB`, level(diskPct, 80, 92))}
+        ${m.temp != null ? meter("Temp", (m.temp / 90) * 100, `${Math.round(m.temp)} °C`, level(m.temp, 70, 82)) : ""}
+      </div>
+      <div class="spark"><div class="k"><span>CPU, last hour</span><span class="num">up ${fmtDur(m.uptime)}</span></div>${spark(m.spark)}</div>
+    </a>`;
+  }).join("") || `<p class="empty">No servers found in Beszel.</p>`;
+
+  $("monitors").innerHTML = S.monitors.map((m) => {
+    const pad = Array(Math.max(0, 30 - m.beats.length)).fill(`<i class="none"></i>`).join("");
+    const beats = pad + m.beats.map((b) => `<i class="b${b}"></i>`).join("");
+    return `<a class="mon" href="#monitor-${m.id}"><div class="mon-name"><span class="dot st-${m.status}"></span><span>${esc(m.name)}</span></div>
+      <div class="beats">${beats}</div>
+      <span class="pct num ${m.uptime24 === 100 ? "dim" : ""}">${fmtUptime(m.uptime24)}</span></a>`;
+  }).join("") || `<p class="empty">No monitors found in Uptime Kuma.</p>`;
+
+  $("ctr-meta").textContent = ctrMeta(S.containers);
+  $("containers").innerHTML = containerRows(S.containers);
+
+  const mc = S.minecraft || { online: false };
+  $("mc-state").innerHTML = `<span class="pill ${mc.online ? "ok" : "bad"}"><span class="dot"></span>${mc.online ? "online" : "offline"}</span>`;
+  $("mc").innerHTML = mc.online
+    ? `<div class="mc-count num">${mc.players}<small> / ${mc.max}</small></div>
+       <dl class="kv"><dt>Players</dt><dd>${mc.players ? esc(mc.names.join(", ") || `${mc.players} online`) : "nobody on right now"}</dd>
+       <dt>Version</dt><dd class="num">${esc(mc.version)}</dd>
+       <dt>Address</dt><dd class="num">${esc(mc.address)}</dd>
+       ${mc.motd ? `<dt>Message</dt><dd>${esc(mc.motd)}</dd>` : ""}</dl>`
+    : `<p class="empty">The server isn't answering on port 25565${mc.error ? ` (${esc(mc.error)})` : ""}.</p>`;
+
+  $("waiting").innerHTML = waitingHtml(S.waiting || []);
+  $("feed").innerHTML = S.activity.map((e) => evRow(e, false)).join("") || `<p class="empty">Nothing in the last 30 days.</p>`;
+}
+
+/* ---------- charts ---------- */
+
+function niceMax(v) {
+  if (!(v > 0)) return 1;
+  const p = 10 ** Math.floor(Math.log10(v)), f = v / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+}
+function axisLabel(ms) {
+  return range === "7d" ? new Date(ms).toLocaleDateString("en-US", { weekday: "short" }) : hm(ms);
+}
+const lastVal = (a) => { for (let i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return null; };
+
+// t: epoch-ms array; series: [{name, color, values}] (null = gap); fmt/axis: value formatters; opts: {max, marks}
+function drawChart(key, t, series, fmt, axis, opts = {}) {
+  const box = $("c-" + key);
+  if (!box) return;
+  const w = Math.max(260, box.clientWidth), h = box.clientHeight || 180;
+  const P = { l: 46, r: 10, t: 8, b: 22 };
+  const t1 = Date.now(), t0 = t1 - RANGES[range].span;
+  const X = (tt) => P.l + ((tt - t0) / (t1 - t0)) * (w - P.l - P.r);
+  const vals = series.flatMap((s) => s.values).filter((v) => v != null);
+  const top = opts.max ?? niceMax((vals.length ? Math.max(...vals) : 1) * 1.12);
+  const Y = (v) => P.t + (1 - Math.min(v, top) / top) * (h - P.t - P.b);
+
+  let g = "";
+  for (let k = 0; k <= 4; k++) {
+    const v = (top * k) / 4, yy = Y(v).toFixed(1);
+    g += `<line x1="${P.l}" x2="${w - P.r}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-width="1"/>`;
+    g += `<text x="${P.l - 6}" y="${yy}" text-anchor="end" dominant-baseline="middle">${axis(v)}</text>`;
+  }
+  for (let k = 0; k <= 4; k++) {
+    const tt = t0 + (k * (t1 - t0)) / 4;
+    g += `<text x="${X(tt).toFixed(1)}" y="${h - 4}" text-anchor="${k === 0 ? "start" : k === 4 ? "end" : "middle"}">${axisLabel(tt)}</text>`;
+  }
+  const segs = (values) => {
+    const out = []; let cur = [];
+    values.forEach((v, i) => { if (v == null) { if (cur.length) out.push(cur); cur = []; } else cur.push([X(t[i]), Y(v)]); });
+    if (cur.length) out.push(cur);
+    return out;
+  };
+  const paths = series.map((s, si) => segs(s.values).map((seg) => {
+    const d = seg.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+    const area = si === 0 && seg.length > 1 ? `<path d="${d} L${seg[seg.length - 1][0].toFixed(1)} ${Y(0)} L${seg[0][0].toFixed(1)} ${Y(0)} Z" fill="${s.color}" fill-opacity="0.1"/>` : "";
+    const dot = seg.length === 1 ? `<circle cx="${seg[0][0]}" cy="${seg[0][1]}" r="2" fill="${s.color}"/>` : "";
+    return area + `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="1.7" stroke-linejoin="round"/>` + dot;
+  }).join("")).join("");
+  const marks = (opts.marks || []).map((m, i) => (m ? `<rect x="${(X(t[i]) - 1.5).toFixed(1)}" y="${h - P.b - 6}" width="3" height="6" fill="var(--bad)"/>` : "")).join("");
+  const empty = t.length ? "" : `<text x="${w / 2}" y="${h / 2}" text-anchor="middle" style="font-family:var(--font-ui);font-size:13px">No data for this range yet</text>`;
+  const hover = `<g class="hv" visibility="hidden"><line class="vl" y1="${P.t}" y2="${h - P.b}" stroke="var(--faint)" stroke-dasharray="3 3"/>` +
+    series.map((s) => `<circle r="3.5" fill="${s.color}" stroke="var(--surface)" stroke-width="1.5"/>`).join("") + `</g>`;
+
+  box.innerHTML = `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(key)} history">${g}${paths}${marks}${empty}${hover}
+    <rect x="${P.l}" y="0" width="${w - P.l - P.r}" height="${h}" fill="transparent"/></svg><div class="tip" hidden></div>`;
+
+  const keys = $("k-" + key);
+  if (keys) keys.innerHTML = series.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.name)} <b>${fmt(lastVal(s.values))}</b></span>`).join("");
+  if (!t.length) return;
+
+  const svg = box.querySelector("svg"), hv = svg.querySelector(".hv"), tip = box.querySelector(".tip");
+  const dots = hv.querySelectorAll("circle"), vl = hv.querySelector(".vl");
+  const move = (e) => {
+    const rect = svg.getBoundingClientRect();
+    const tt = t0 + ((((e.clientX - rect.left) / rect.width) * w - P.l) / (w - P.l - P.r)) * (t1 - t0);
+    let lo = 0, hi = t.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (t[mid] < tt) lo = mid + 1; else hi = mid; }
+    const i = lo > 0 && Math.abs(t[lo - 1] - tt) < Math.abs(t[lo] - tt) ? lo - 1 : lo;
+    const xx = X(t[i]);
+    vl.setAttribute("x1", xx); vl.setAttribute("x2", xx);
+    series.forEach((s, si) => {
+      const v = s.values[i];
+      dots[si].setAttribute("visibility", v == null ? "hidden" : "visible");
+      if (v != null) { dots[si].setAttribute("cx", xx); dots[si].setAttribute("cy", Y(v)); }
+    });
+    hv.setAttribute("visibility", "visible");
+    tip.innerHTML = `<div class="t">${when(t[i])}</div>` + series.map((s) =>
+      `<div><i style="background:${s.color}"></i>${esc(s.name)}<span class="num">${fmt(s.values[i])}</span></div>`).join("") +
+      (opts.marks && opts.marks[i] ? `<div>⚠ ${opts.marks[i]} failed check${opts.marks[i] > 1 ? "s" : ""}</div>` : "");
+    tip.hidden = false;
+    const tw = tip.offsetWidth, left = (xx / w) * rect.width;
+    tip.style.left = Math.max(0, Math.min(rect.width - tw, left + (left > rect.width / 2 ? -tw - 12 : 12))) + "px";
+  };
+  svg.addEventListener("pointermove", move);
+  svg.addEventListener("pointerdown", move);
+  svg.addEventListener("pointerleave", () => { hv.setAttribute("visibility", "hidden"); tip.hidden = true; });
+}
+
+const AX = {
+  pct: (v) => `${+v.toFixed(2)}%`, gb: (v) => `${+v.toFixed(1)}`, mb: (v) => `${Math.round(v)}`, c: (v) => `${Math.round(v)}°`,
+  ms: (v) => `${+v.toFixed(1)}`, load: (v) => `${+v.toFixed(2)}`,
+  rate: (v) => (v >= 1e6 ? `${+(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${+(v / 1e3).toFixed(0)}k` : `${Math.round(v)}`),
+};
+
+/* ---------- detail views ---------- */
+
+function renderServer(m) {
+  const ramPct = m.ram[1] ? (m.ram[0] / m.ram[1]) * 100 : 0, diskPct = m.disk[1] ? (m.disk[0] / m.disk[1]) * 100 : 0;
+  const la = m.load || [];
+  const statusCls = m.status === "up" ? "ok" : "bad";
+  $("view-detail").innerHTML = `${crumb}
+    <div class="dhead">
+      <div>
+        <h2>${esc(m.name)} <span class="health ${statusCls}"><span class="dot"></span>${esc(m.status === "up" ? "online" : m.status)}</span></h2>
+        <div class="specs">${[m.cpu_model, `${m.cores} cores / ${m.threads} threads`, `${fmtGB(m.ram[1])} RAM`, m.os, `kernel ${m.kernel}`, `Beszel agent ${m.agent}`]
+          .map((s) => `<span>${esc(s)}</span>`).join("")}</div>
+      </div>
+      <div class="dtools">${tabs()}<a href="${appUrl(8090)}" target="_blank" rel="noopener">Open in Beszel →</a></div>
+    </div>
+    <div class="stats">
+      ${tile("CPU", fmtPct(m.cpu), `${m.threads} threads`, level(m.cpu))}
+      ${tile("Memory", fmtGB(m.ram[0]), `of ${fmtGB(m.ram[1])} · ${ramPct.toFixed(0)}%${m.swap[1] ? ` · swap ${n1(m.swap[0] || 0)} of ${n1(m.swap[1])} GB` : ""}`, level(ramPct, 80, 92))}
+      ${tile("Disk", fmtGB(m.disk[0]), `of ${Math.round(m.disk[1])} GB · ${diskPct.toFixed(0)}%`, level(diskPct, 80, 92))}
+      ${tile("Temperature", m.temp != null ? `${Math.round(m.temp)} °C` : "–", m.temp_name || "no sensor", level(m.temp ?? 0, 70, 82))}
+      ${tile("Load", la[0] != null ? la[0].toFixed(2) : "–", la.length ? `${la[1].toFixed(2)} · ${la[2].toFixed(2)} (5 / 15 min)` : "", level(((la[0] || 0) / (m.threads || 1)) * 100))}
+      ${tile("Uptime", fmtDur(m.uptime), m.uptime ? `since ${new Date(Date.now() - m.uptime * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "")}
+    </div>
+    <div class="charts">
+      ${chartPanel("cpu", "CPU")}${chartPanel("mem", "Memory")}${chartPanel("temp", "Temperature")}
+      ${chartPanel("net", "Network")}${chartPanel("disk", "Disk I/O")}${chartPanel("load", "Load average")}
+    </div>
+    <div class="grid">
+      <section class="panel span-7">
+        <div class="panel-head"><h3>Containers on this machine</h3><span class="meta num">${m.containers.length ? ctrMeta(m.containers) : ""}</span></div>
+        ${m.containers.length ? ctrTable(m.containers) : `<p class="empty">No Docker containers reported on this machine.</p>`}
+      </section>
+      <div class="stack span-5">
+        <section class="panel">
+          <div class="panel-head"><h3>Disk</h3></div>
+          <div class="meters">${meter("/", diskPct, `${n1(m.disk[0])} / ${Math.round(m.disk[1])} GB`, level(diskPct, 80, 92))}</div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h3>Network interfaces</h3><span class="meta">right now · since boot</span></div>
+          <dl class="kv">${m.nics.map((n) => `<dt class="num">${esc(n.name)}</dt><dd><span class="num">↑ ${fmtRate(n.up)} ↓ ${fmtRate(n.down)}</span><br><span class="note">${fmtBytes(n.total_up)} sent · ${fmtBytes(n.total_down)} received</span></dd>`).join("") || "<dd>None reported</dd>"}</dl>
+        </section>
+      </div>
+    </div>`;
+}
+
+function chartsServer(m) {
+  const h = m.history;
+  drawChart("cpu", h.t, [{ name: "CPU", color: "var(--accent)", values: h.cpu }], fmtPct, AX.pct, { max: 100 });
+  drawChart("mem", h.t, [{ name: "Used", color: "var(--accent)", values: h.mem_used }, { name: "Cache", color: "var(--s2)", values: h.mem_cache }], fmtGB, AX.gb, { max: m.ram[1] || undefined });
+  drawChart("temp", h.t, h.temps.map((s, i) => ({ name: s.name, color: ["var(--accent)", "var(--s3)"][i], values: s.values })),
+    (v) => (v == null ? "–" : `${Math.round(v)} °C`), AX.c, { max: Math.max(60, niceMax(Math.max(0, ...h.temps.flatMap((s) => s.values).filter((v) => v != null)) * 1.15)) });
+  drawChart("net", h.t, [{ name: "Download", color: "var(--accent)", values: h.net_down }, { name: "Upload", color: "var(--s2)", values: h.net_up }], fmtRate, AX.rate);
+  drawChart("disk", h.t, [{ name: "Read", color: "var(--accent)", values: h.disk_read }, { name: "Write", color: "var(--s2)", values: h.disk_write }], fmtRate, AX.rate);
+  drawChart("load", h.t, [{ name: "1 min", color: "var(--accent)", values: h.load1 }, { name: "15 min", color: "var(--s2)", values: h.load15 }],
+    (v) => (v == null ? "–" : v.toFixed(2)), AX.load);
+}
+
+function renderMonitor(m) {
+  const beats = m.beats;
+  const fails = beats.filter((b) => b.status !== 1).length;
+  const uCls = (u) => (u == null ? "" : u < 99 ? "bad" : u < 99.9 ? "warn" : "");
+  $("view-detail").innerHTML = `${crumb}
+    <div class="dhead">
+      <div>
+        <h2>${esc(m.name)} ${statusPill(m.status)}</h2>
+        <div class="specs"><span>${esc(m.kind)} check</span><span class="num">${esc(m.target)}</span><span>every ${m.interval} s</span></div>
+      </div>
+      <div class="dtools">${tabs()}<a href="${appUrl(3001)}/dashboard/${m.id}" target="_blank" rel="noopener">Open in Uptime Kuma →</a></div>
+    </div>
+    <div class="stats">
+      ${tile("Status", (STATUS[m.status] || ["Unknown"])[0], `last check ${ago(m.last)}`, (STATUS[m.status] || [, ""])[1])}
+      ${tile("Response now", fmtMs(m.ping), "latest check")}
+      ${tile("Average", fmtMs(m.avg24), "last 24 h")}
+      ${tile("Uptime 24 h", fmtUptime(m.uptime24), "", uCls(m.uptime24))}
+      ${tile("Uptime 7 days", fmtUptime(m.uptime7), "", uCls(m.uptime7))}
+      ${tile("Uptime 30 days", fmtUptime(m.uptime30), "", uCls(m.uptime30))}
+    </div>
+    <div class="grid">
+      <div class="span-7" style="display:grid">${chartPanel("mrt", "Response time", true)}</div>
+      <section class="panel span-5">
+        <div class="panel-head"><h3>Last ${beats.length} checks</h3><span class="meta num">${beats.length - fails} passed · ${fails} failed</span></div>
+        <div class="beats big">${beats.map((b) => `<i class="b${b.status}" title="${esc(when(b.t))} · ${b.status === 1 ? fmtMs(b.ping) : (STATUS[b.status] || ["?"])[0]}"></i>`).join("")}</div>
+        <div class="legend"><span>${beats.length ? esc(when(beats[0].t)) : ""}</span><span>now</span></div>
+        <p class="note">Red is down, amber is a failed check that Kuma retried. Hover a bar for its time and response.</p>
+      </section>
+    </div>
+    <section class="panel">
+      <div class="panel-head"><h3>Outages and failed checks</h3><span class="meta">last 30 days</span></div>
+      ${m.outages.length
+        ? `<div class="table-wrap"><table><thead><tr><th>Started</th><th>Lasted</th><th>Type</th><th>Reason</th></tr></thead><tbody>${m.outages.map((o) =>
+            `<tr><td class="num">${esc(when(o.start))}</td><td class="num">${o.end ? fmtDur((o.end - o.start) / 1000) : "still going"}</td>
+             <td>${o.type === "down" ? `<span class="pill bad"><span class="dot"></span>down, alerted</span>` : `<span class="pill warn"><span class="dot"></span>${o.checks} failed check${o.checks > 1 ? "s" : ""}</span>`}</td>
+             <td>${esc(o.reason)}</td></tr>`).join("")}</tbody></table></div>`
+        : `<p class="empty">No outages or failed checks in the last 30 days.</p>`}
+      <p class="note">Kuma keeps every check for about 2 days, so short failed checks older than that aren't listed. Outages it alerted on are kept for 30 days.</p>
+    </section>`;
+}
+
+function chartsMonitor(m) {
+  drawChart("mrt", m.history.t, [{ name: "Response", color: "var(--accent)", values: m.history.ping }], fmtMs, AX.ms, { marks: m.history.down });
+}
+
+function renderContainer(c) {
+  const memPct = c.limit && c.mem != null ? (c.mem / c.limit) * 100 : null;
+  const checkState = !c.check ? ["None", "Docker only tracks running", ""] :
+    c.health === "healthy" ? ["Passing", `every ${c.check_interval || 30} s`, "ok"] :
+    c.health === "starting" ? ["Starting", "waiting for the first check", "warn"] :
+    [`Failing`, `${c.failing || 0} failures in a row`, "bad"];
+  const logs = c.logs.map((l) => `<span class="ts">${l.t ? esc(hms(l.t)) : "        "}</span>  <span class="${l.stream === "err" ? "err" : ""}">${esc(l.msg)}</span>`).join("\n");
+  $("view-detail").innerHTML = `${crumb}
+    <div class="dhead">
+      <div>
+        <h2 class="mono">${esc(c.name)} ${healthPill(c)}</h2>
+        <div class="specs"><span class="num">${esc(c.image)}</span><span>${esc(c.stack)} stack</span><span>${esc(c.host)}</span></div>
+      </div>
+      <div class="dtools">${tabs()}</div>
+    </div>
+    <div class="stats">
+      ${tile("CPU", fmtPct(c.cpu), "right now", c.cpu >= 20 ? "warn" : "")}
+      ${tile("Memory", fmtMB(c.mem), c.limit ? `of ${fmtMB(c.limit)} limit · ${memPct.toFixed(0)}%` : "no memory limit", memPct ? level(memPct, 75, 90) : "")}
+      ${tile("Up", c.started ? fmtDur((Date.now() - c.started) / 1000) : c.state, c.started ? `since ${when(c.started)}` : "")}
+      ${tile("Restarts", String(c.restarts), "since it was created", c.restarts ? "warn" : "")}
+      ${tile("Health check", checkState[0], checkState[1], checkState[2])}
+      ${tile("Restart policy", c.restart, c.restart === "always" ? "even after a manual stop" : c.restart === "unless-stopped" ? "unless stopped by hand" : "")}
+    </div>
+    <div class="charts">${chartPanel("ccpu", "CPU")}${chartPanel("cmem", "Memory")}</div>
+    <div class="grid">
+      <section class="panel span-7">
+        <div class="panel-head"><h3>Settings</h3><span class="meta">from Docker</span></div>
+        <dl class="kv">
+          <dt>Image</dt><dd class="num">${esc(c.image)} <span class="note">(${esc(c.image_id)})</span></dd>
+          <dt>Compose project</dt><dd class="num">${esc(c.project || "none")}</dd>
+          ${c.workdir ? `<dt>Folder</dt><dd class="num">${esc(c.workdir)}</dd>` : ""}
+          <dt>Created</dt><dd>${esc(when(c.created))}</dd>
+          <dt>Started</dt><dd>${esc(c.started ? when(c.started) : "not running")}</dd>
+          <dt>Ports</dt><dd class="num">${c.ports.length ? c.ports.map(esc).join("<br>") : c.network_mode === "host" ? "host network (uses the server's ports directly)" : "none published"}</dd>
+          <dt>Network</dt><dd class="num">${esc(c.network_mode === "host" ? "host" : c.networks.join(", "))}</dd>
+          <dt>Mounts</dt><dd class="num">${c.mounts.length ? c.mounts.map((m) => `${esc(m.src)} → ${esc(m.dst)}${m.rw ? "" : " (read-only)"}`).join("<br>") : "none"}</dd>
+          <dt>Health check</dt><dd class="num">${c.check ? esc(c.check) : "none"}</dd>
+          ${c.limit ? `<dt>Memory limit</dt><dd class="num">${fmtMB(c.limit)}</dd>` : ""}
+        </dl>
+      </section>
+      <div class="stack span-5">
+        <section class="panel">
+          <div class="panel-head"><h3>Rollback copies</h3><span class="meta num">${c.rollbacks.length}</span></div>
+          ${c.rollbacks.length
+            ? `<div class="rb">${c.rollbacks.map((r) => `<div><span>${esc(r.label)}</span><span class="num">${fmtBytes(r.size)}</span></div>`).join("")}</div>
+               ${c.rollback_svc ? `<p class="note">Old images kept by homelab-updater. Undo the last update with <code>sudo homelab-rollback ${esc(c.rollback_svc)}</code></p>` : ""}`
+            : `<p class="empty">None kept for this container.</p>`}
+        </section>
+        ${c.check ? `<section class="panel">
+          <div class="panel-head"><h3>Recent health checks</h3></div>
+          <div class="rb">${c.health_log.map((h) => `<div><span class="num">${esc(hms(h.t))}</span><span>${h.exit === 0 ? `<span class="pill ok">passed</span>` : `<span class="pill bad">failed (exit ${h.exit})</span>`}</span></div>`).join("") || `<div><span class="note">No results yet.</span></div>`}</div>
+        </section>` : ""}
+      </div>
+    </div>
+    <section class="panel">
+      <div class="panel-head"><h3>Recent logs</h3><span class="meta">last ${c.logs.length} lines · passwords and keys masked</span></div>
+      ${c.logs_error ? `<p class="empty">Couldn't read logs: ${esc(c.logs_error)}</p>` : logs ? `<pre class="logs" id="logs">${logs}</pre>` : `<p class="empty">No log lines.</p>`}
+    </section>`;
+  const pre = $("logs");
+  if (pre) pre.scrollTop = pre.scrollHeight;
+}
+
+function chartsContainer(c) {
+  drawChart("ccpu", c.history.t, [{ name: "CPU", color: "var(--accent)", values: c.history.cpu }], fmtPct, AX.pct);
+  drawChart("cmem", c.history.t, [{ name: "Memory", color: "var(--s2)", values: c.history.mem }], fmtMB, AX.mb);
+}
+
+const CATS = [["all", "All"], ["problem", "Problems"], ["waiting", "Waiting on you"], ["update", "Updates"], ["report", "Reports"], ["backup", "Backups"]];
+
+function renderActivity(a) {
+  const A = a.events, sum = a.summary;
+  const count = (cat) => (cat === "all" ? A.length : A.filter((e) => e.cat === cat).length);
+  const list = actFilter === "all" ? A : A.filter((e) => e.cat === actFilter);
+  const days = [...new Set(list.map((e) => dayName(e.t)))];
+  const rep = sum.report;
+  $("view-detail").innerHTML = `${crumb}
+    <div class="dhead">
+      <div>
+        <h2>Activity</h2>
+        <div class="specs"><span>Health reports, updates, backups, the watchdog and Uptime Kuma alerts from the last ${a.days} days</span></div>
+      </div>
+    </div>
+    <div class="stats four">
+      ${tile("Problems", String(sum.problems), "in the last 7 days", sum.problems ? "bad" : "ok")}
+      ${tile("Updates applied", String(sum.updates), "in the last 7 days")}
+      ${tile("Waiting on you", String(sum.waiting.length), sum.waiting.map((w) => w.svc).join(", ") || "nothing pending", sum.waiting.length ? "warn" : "")}
+      ${tile("Last health report", rep ? rep.title.replace("Health report: ", "") : "–", rep ? when(rep.t) : "", rep ? { ok: "ok", warn: "warn", bad: "bad" }[rep.sev] : "")}
+    </div>
+    ${sum.waiting.length ? `<div class="waiting">${waitingHtml(sum.waiting)}</div>` : ""}
+    <section class="panel">
+      <div class="panel-head">
+        <div class="chips" role="group" aria-label="Filter">${CATS.map(([k, l]) =>
+          `<button type="button" class="chip" data-cat="${k}" aria-pressed="${k === actFilter}">${l}<span class="num">${count(k)}</span></button>`).join("")}</div>
+      </div>
+      <div class="days">${days.map((d) => `<div class="day"><h3>${esc(d)}</h3>${list.filter((e) => dayName(e.t) === d).map((e) => evRow(e, true)).join("")}</div>`).join("") || `<p class="empty">Nothing here.</p>`}</div>
+      <p class="note">From the server's system journal and Uptime Kuma. The same events are pushed to your phone through ntfy.</p>
+    </section>`;
+}
+
+/* ---------- loading and routing ---------- */
+
+function drawCharts() {
+  if (!current || !detail) return;
+  if (current.type === "server") chartsServer(detail);
+  else if (current.type === "monitor") chartsMonitor(detail);
+  else if (current.type === "container") chartsContainer(detail);
+}
+
+async function loadDetail(quiet) {
+  const cur = current;
+  if (!cur) return;
+  const path = cur.type === "activity" ? "/api/activity" : `/api/${cur.type}/${cur.key}?range=${range}`;
+  if (!quiet) { $("view-detail").innerHTML = `${crumb}<p class="loading">Loading…</p>`; detailSig = ""; }
+  try {
+    const data = await api(path);
+    if (cur !== current) return;
+    const sig = JSON.stringify(data);
+    if (quiet && sig === detailSig) return;
+    const open = [...document.querySelectorAll("#view-detail details[open]")].map((d) => d.closest(".ev")?.textContent.slice(0, 80));
+    detail = data; detailSig = sig;
+    if (cur.type === "server") renderServer(data);
+    else if (cur.type === "monitor") renderMonitor(data);
+    else if (cur.type === "container") renderContainer(data);
+    else renderActivity(data);
+    if (open.length) document.querySelectorAll("#view-detail .ev details").forEach((d) => { if (open.includes(d.closest(".ev").textContent.slice(0, 80))) d.open = true; });
+    drawCharts();
+  } catch (e) {
+    if (cur === current && !quiet) $("view-detail").innerHTML = `${crumb}<p class="empty">Couldn't load this page: ${esc(e.message)}</p>`;
+  }
+}
+
+async function refreshSummary() {
+  try {
+    S = await api("/api/summary");
+    $("offline").hidden = true;
+    renderTop();
+    if (!current) renderHome();
+  } catch {
+    $("offline").hidden = false;
+  }
+}
+
+function route() {
+  const h = location.hash.slice(1);
+  const m = h.match(/^(server|monitor|container)-([a-z0-9-]+)$/);
+  current = h === "activity" ? { type: "activity" } : m ? { type: m[1], key: m[2] } : null;
+  detail = null;
+  $("view-home").hidden = !!current;
+  $("view-detail").hidden = !current;
+  if (current) loadDetail(false);
+  else if (S) renderHome();
+  window.scrollTo(0, 0);
+}
+
+document.addEventListener("click", (e) => {
+  const tab = e.target.closest(".tabs button[data-range]");
+  if (tab) { range = tab.dataset.range; store.set("range", range); loadDetail(true); document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.range === range))); return; }
+  const chip = e.target.closest(".chip[data-cat]");
+  if (chip && detail) { actFilter = chip.dataset.cat; renderActivity(detail); return; }
+  const row = e.target.closest("tr[data-href]");
+  if (row && !e.target.closest("a")) location.hash = row.dataset.href;
+});
+window.addEventListener("hashchange", route);
+let rt;
+window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(drawCharts, 120); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { refreshSummary(); if (current) loadDetail(true); } });
+
+tickClock();
+setInterval(tickClock, 10_000);
+route();
+refreshSummary();
+setInterval(() => { if (!document.hidden) refreshSummary(); }, 15_000);
+setInterval(() => { if (!document.hidden && current && current.type !== "activity") loadDetail(true); }, 30_000);
+</script>
+</body>
+</html>

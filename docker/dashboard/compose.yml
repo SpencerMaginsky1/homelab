@@ -1,0 +1,51 @@
+# Homelab dashboard (README 3.14). Reads Beszel, Uptime Kuma and the system journal read-only,
+# and Docker through its own read-only proxy. No passwords or secrets.
+networks:
+  dashboard:
+    driver_opts:
+      com.docker.network.bridge.name: br-dashboard   # fixed name in case ufw rules are ever needed
+  dockerapi:
+    internal: true                                   # only the dashboard can reach the proxy; no internet
+
+services:
+  dashboard:
+    build: .
+    image: homelab-dashboard:local
+    container_name: dashboard
+    restart: unless-stopped
+    networks: [dashboard, dockerapi]
+    ports:
+      - "7576:7576"          # published by Docker, so LAN + tailnet reach it without a ufw rule (router doesn't forward it)
+    group_add: ["4"]         # adm: lets journalctl read /var/log/journal
+    volumes:
+      - ../beszel/beszel_data:/data/beszel:ro
+      - ../uptime-kuma/data:/data/kuma:ro
+      - /var/log/journal:/var/log/journal:ro
+      - ./config.json:/app/config.json:ro   # links and shortcuts; edit, then `docker compose restart`
+    environment:
+      HOST_IP: 192.168.1.179
+      MC_ADDRESS: example.duckdns.org
+      TZ: America/New_York
+    depends_on: [docker-proxy]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7576/ping', timeout=4)"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+
+  # Read-only Docker API: list/inspect containers, read logs, list images. No start/stop/exec (POST=0).
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: dashboard-docker-proxy
+    networks: [dockerapi]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      POST: 0
+    restart: unless-stopped

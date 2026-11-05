@@ -172,6 +172,7 @@ Stacks live in `~/Desktop/docker/`.
 
 | Service | Folder | Web UI |
 |---|---|---|
+| Dashboard | `~/Desktop/docker/dashboard` | http://192.168.1.179:7576 |
 | Homarr | `~/Desktop/docker/homarr` | http://192.168.1.179:7575 |
 | Uptime Kuma | `~/Desktop/docker/uptime-kuma` | http://192.168.1.179:3001 |
 | Beszel | `~/Desktop/docker/beszel` | http://192.168.1.179:8090 |

@@ -1,0 +1,16 @@
+{
+  "apps": [
+    { "name": "Homarr", "port": 7575, "monitor": "Homarr" },
+    { "name": "Uptime Kuma", "port": 3001, "check": "kuma" },
+    { "name": "Beszel", "port": 8090, "check": "beszel" },
+    { "name": "Dawarich", "port": 3000, "monitor": "Dawarich" },
+    { "name": "GolfApp", "port": 8001, "monitor": "GolfApp" },
+    { "name": "Ship Tracker", "port": 8100, "monitor": "Ship Tracker" },
+    { "name": "Plex", "port": 32400, "path": "/web", "monitor": "Plex" }
+  ],
+  "shortcuts": [
+    { "name": "VS Code → Server", "glyph": "VS", "url": "vscode://vscode-remote/ssh-remote+spencer-server/home/spencer/Desktop/Claude" },
+    { "name": "GitHub", "glyph": "GH", "url": "https://github.com/SpencerMaginsky1" },
+    { "name": "Claude", "glyph": "C", "url": "https://claude.ai/" }
+  ]
+}
