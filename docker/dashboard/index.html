@@ -1389,19 +1389,14 @@ function renderWeather(w) {
 
 /* rain timing: windows come from the backend (hours >= 50% chance or >= 0.01 in) */
 const hShort = (ms) => { const d = new Date(ms); return d.getMinutes() ? hm(ms) : d.toLocaleTimeString("en-US", { hour: "numeric", hour12: true }); };
-function relDay(ms) {
-  const d = new Date(ms).toDateString(), t = new Date();
-  if (d === t.toDateString()) return "today";
-  t.setDate(t.getDate() + 1);
-  if (d === t.toDateString()) return "tomorrow";
-  return new Date(ms).toLocaleDateString("en-US", { weekday: "long" });
-}
+const weekday = (ms) => new Date(ms).toLocaleDateString("en-US", { weekday: "long" });
+const sameDate = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
 const rainLabel = (r) => (r.peak < 40 ? `Possible ${r.kind.toLowerCase()}` : r.kind);
-function rainWhen(r, withDay = true) {
+// "Friday 8 AM – 8 PM", "Thursday 9 PM – Friday 3 AM", or "now until 5 PM"; a window ending at midnight counts as the same day
+function rainWhen(r) {
   const now = Date.now();
-  if (r.start <= now) return `now until ${hShort(r.end)}${relDay(r.end) !== "today" ? " " + relDay(r.end) : ""}`;
-  const a = withDay ? `${relDay(r.start)} ` : "", sameDay = new Date(r.start).toDateString() === new Date(r.end - 1).toDateString();
-  return `${a}${hShort(r.start)} – ${hShort(r.end)}${sameDay ? "" : " " + relDay(r.end)}`;
+  if (r.start <= now) return `now until ${hShort(r.end)}${sameDate(r.end - 1, now) ? "" : " " + weekday(r.end - 1)}`;
+  return `${weekday(r.start)} ${hShort(r.start)} – ${sameDate(r.start, r.end - 1) ? "" : weekday(r.end - 1) + " "}${hShort(r.end)}`;
 }
 const rainDetail = (r) => `${r.peak}% chance at most${r.total >= 0.01 ? ` · about ${r.total.toFixed(2)} in` : ""} · ${r.hours} hour${r.hours > 1 ? "s" : ""}`;
 const upcomingRain = (w) => (w.rain_windows || []).filter((r) => r.end > Date.now());
