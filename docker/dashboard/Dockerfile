@@ -4,7 +4,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 systemd ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY app.py index.html favicon.svg favicon.ico apple-touch-icon.png ./
+COPY app.py index.html favicon.svg favicon.ico apple-touch-icon.png icon-192.png icon-512.png manifest.webmanifest ./
 USER 65534:65534
 EXPOSE 7576
 CMD ["python3", "-u", "app.py"]

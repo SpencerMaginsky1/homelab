@@ -1036,7 +1036,8 @@ def event_detail(eid):
 
 
 STATIC = {"/favicon.svg": ("favicon.svg", "image/svg+xml"), "/favicon.ico": ("favicon.ico", "image/x-icon"),
-          "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png")}
+          "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png"), "/icon-192.png": ("icon-192.png", "image/png"),
+          "/icon-512.png": ("icon-512.png", "image/png"), "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json")}
 
 
 class Handler(BaseHTTPRequestHandler):
