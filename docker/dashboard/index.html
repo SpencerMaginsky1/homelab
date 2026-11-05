@@ -462,7 +462,7 @@ a.rainrow:hover strong { color: var(--accent); }
 @media (max-width: 700px) {
   body { padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
   .tabbar {
-    display: grid; grid-template-columns: repeat(4, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
     background: var(--surface); border-top: 1px solid var(--line);
     padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
   }
@@ -579,6 +579,7 @@ a.rainrow:hover strong { color: var(--accent); }
 <nav class="tabbar" aria-label="Sections">
   <a href="#" data-tab="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</a>
   <a href="#server-spencer-server" data-tab="server"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>Server</a>
+  <a href="#weather" data-tab="weather"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2.5V4M2.5 8H4M4.1 4.1l1 1M11.9 4.1l-1 1"/><path d="M5.2 10.6A3.5 3.5 0 1 1 11.4 7.5"/><path d="M9 20h8a3.5 3.5 0 0 0 .5-6.96A5 5 0 0 0 8.4 13.6 3.2 3.2 0 0 0 9 20z"/></svg>Weather</a>
   <a href="#minecraft" data-tab="minecraft"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l6-6-6-6M12 19h8"/></svg>Minecraft</a>
   <a href="#activity" data-tab="activity"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Activity</a>
 </nav>
@@ -1560,6 +1561,7 @@ function route() {
   detail = null;
   stopConsole();
   const tab = !current ? "home" : current.type === "server" ? "server" : current.type === "minecraft" ? "minecraft"
+    : current.type === "weather" || current.type === "weatherday" ? "weather"
     : current.type === "activity" || current.type === "event" ? "activity" : "";
   document.querySelectorAll(".tabbar a").forEach((a) => { if (a.dataset.tab === tab) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
   $("view-home").hidden = !!current;
