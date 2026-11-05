@@ -870,6 +870,10 @@ def activity_page():
     return {"events": events, "summary": activity_summary(events), "days": ACTIVITY_DAYS}
 
 
+STATIC = {"/favicon.svg": ("favicon.svg", "image/svg+xml"), "/favicon.ico": ("favicon.ico", "image/x-icon"),
+          "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png")}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -877,7 +881,7 @@ class Handler(BaseHTTPRequestHandler):
     def send(self, code, body, ctype="application/json"):
         data = body if isinstance(body, bytes) else (json.dumps(body, ensure_ascii=False) if ctype == "application/json" else body).encode()
         self.send_response(code)
-        self.send_header("Content-Type", ctype + "; charset=utf-8")
+        self.send_header("Content-Type", ctype + ("; charset=utf-8" if ctype.startswith(("text/", "application/json")) else ""))
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -893,6 +897,10 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/":
                 with open(os.path.join(HERE, "index.html"), "rb") as f:
                     return self.send(200, f.read(), "text/html")
+            if p in STATIC:
+                name, ctype = STATIC[p]
+                with open(os.path.join(HERE, name), "rb") as f:
+                    return self.send(200, f.read(), ctype)
             if p == "/ping":
                 return self.send(200, "ok", "text/plain")
             if p == "/api/summary":
