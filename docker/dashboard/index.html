@@ -393,6 +393,18 @@ a.wxday:hover { border-color: var(--accent); }
 .tabs a[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
 .dhead h2 .wxi { width: 34px; height: 34px; }
 .wxcell { display: inline-flex; align-items: center; gap: 8px; }
+.wxrain { color: var(--accent); font-weight: 600; }
+.wxwhen { font-size: 12.5px; color: var(--accent); font-weight: 600; }
+.rainlist { display: flex; flex-direction: column; }
+.rainrow { display: flex; gap: 12px; align-items: center; padding: 9px 8px; margin: 0 -8px; border-top: 1px solid var(--line); border-radius: 6px; }
+.rainrow:first-child { border-top-color: transparent; }
+a.rainrow:hover { background: var(--sunk); }
+a.rainrow:hover strong { color: var(--accent); }
+.rainrow strong { font-weight: 600; font-size: 13.5px; }
+.rainrow p { margin: 1px 0 0; }
+.rainrow.pastrain { opacity: .5; }
+.rainrow.maybe .wxi { stroke: var(--faint); }
+.wxwhen.maybe { color: var(--muted); font-weight: 500; }
 .wxhours tr.past td { opacity: .45; }
 .wxhours tr.nowrow td { background: var(--accent-soft); }
 .wxhours .wet { color: var(--accent); font-weight: 600; }
@@ -408,6 +420,7 @@ a.wxday:hover { border-color: var(--accent); }
   .wxday .wxi { width: 30px; height: 30px; }
   .wxtext { min-height: 0; }
   .wxmeta { grid-column: 3 / -1; flex-direction: row; flex-wrap: wrap; gap: 2px 12px; }
+  .wxwhen { grid-column: 3 / -1; }
 }
 @media (max-width: 600px) {
   .wxnow .kv { grid-template-columns: auto minmax(0, 1fr); }
@@ -749,7 +762,9 @@ function renderTop() {
   const up = S.monitors.filter((m) => m.status === 1).length;
   $("summary").innerHTML = `<span>${running}/${S.containers.length} containers</span><span>${up}/${S.monitors.length} monitors up</span>${S.uptime ? `<span>up ${fmtDur(S.uptime)}</span>` : ""}`;
   const w = S.weather;
-  $("wx").innerHTML = w ? `<a class="wxlink" href="#weather" title="5-day forecast"><span class="num">${w.temp}°F</span> ${esc(w.text.toLowerCase())}, ${esc(w.place)}</a>` : "";
+  const nr = w && w.next_rain;
+  const rainNote = nr ? ` · <span class="wxrain">${nr.start <= Date.now() ? `rain until ${esc(hShort(nr.end))}` : `rain ${esc(hShort(nr.start))}`}</span>` : "";
+  $("wx").innerHTML = w ? `<a class="wxlink" href="#weather" title="5-day forecast"><span class="num">${w.temp}°F</span> ${esc(w.text.toLowerCase())}, ${esc(w.place)}${rainNote}</a>` : "";
   const errs = Object.entries(S.errors || {});
   const items = h.items.filter((x) => x !== "Some data couldn't be loaded");
   const al = $("alerts");
@@ -841,7 +856,10 @@ function drawChart(key, t, series, fmt, axis, opts = {}) {
   const top = opts.max ?? niceMax((vals.length ? Math.max(...vals) : 1) * 1.12);
   const Y = (v) => P.t + (1 - (Math.min(v, top) - bottom) / (top - bottom)) * (h - P.t - P.b);
 
-  let g = "";
+  let g = (opts.bands || []).map(([a, b]) => {  // shaded time spans, e.g. expected rain
+    const x0 = X(Math.max(a, t0)), x1 = X(Math.min(b, t1));
+    return x1 > x0 ? `<rect x="${x0.toFixed(1)}" y="${P.t}" width="${(x1 - x0).toFixed(1)}" height="${h - P.t - P.b}" fill="var(--accent)" fill-opacity="0.09"/>` : "";
+  }).join("");
   for (let k = 0; k <= 4; k++) {
     const v = bottom + ((top - bottom) * k) / 4, yy = Y(v).toFixed(1);
     g += `<line x1="${P.l}" x2="${w - P.r}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-width="1"/>`;
@@ -1344,6 +1362,13 @@ function renderWeather(w) {
       </dl>
     </section>
     <section class="panel">
+      <div class="panel-head"><h3>When it'll rain</h3><span class="meta">next 5 days</span></div>
+      ${upcomingRain(w).length ? `<div class="rainlist">${upcomingRain(w).map((r) => `<a class="rainrow${r.peak < 40 ? " maybe" : ""}" href="#weather-day-${Math.max(0, w.days.findIndex((d, j) => r.start < (w.days[j + 1] ? w.days[j + 1].t : d.t + 86400e3)))}">
+          ${wxIcon(r.kind === "Thunderstorms" ? "storm" : r.kind === "Snow" ? "snow" : "rain", 26)}
+          <div><strong>${esc(rainLabel(r))}, ${esc(rainWhen(r))}</strong><p class="note">${esc(rainDetail(r))}</p></div></a>`).join("")}</div>`
+        : `<p class="empty">No rain expected in the next 5 days.</p>`}
+    </section>
+    <section class="panel">
       <div class="panel-head"><h3>5-day forecast</h3><span class="meta">click a day for hour by hour</span></div>
       <div class="wxdays">${w.days.map((d, i) => `<a class="wxday" href="#weather-day-${i}" aria-label="${esc(dayLabel(d.t, i))}, hour by hour">
         <div class="wxname"><strong>${esc(dayLabel(d.t, i))}</strong><span class="note">${esc(new Date(d.t).toLocaleDateString("en-US", { month: "short", day: "numeric" }))}</span></div>
@@ -1351,10 +1376,44 @@ function renderWeather(w) {
         <div class="wxtext">${esc(d.text)}</div>
         <div class="wxrange"><span class="num hi">${deg(d.high)}</span><div class="wxbar"><i style="left:${pos(d.low)}%;right:${100 - pos(d.high)}%"></i></div><span class="num lo">${deg(d.low)}</span></div>
         <div class="wxmeta num"><span class="${d.rain_chance >= 50 ? "wet" : ""}">${d.rain_chance ?? 0}% rain${d.rain >= 0.01 ? ` · ${d.rain.toFixed(2)} in` : ""}</span><span>wind ${Math.round(d.wind)} mph</span></div>
+        ${(() => { const rs = rainIn(w, d.t, w.days[i + 1] ? w.days[i + 1].t : d.t + 86400e3).filter((r) => r.end > Date.now()).sort((a, b) => b.peak - a.peak);
+          if (!rs.length) return "";
+          const r = rs[0], now = Date.now(), word = r.start <= now ? "Raining now" : r.peak < 40 ? "Possible rain" : "Rain";
+          return `<div class="wxwhen${r.peak < 40 && r.start > now ? " maybe" : ""}">${esc(word)} ${esc(r.start <= now ? `until ${hShort(r.end)}` : `${hShort(r.start)}–${hShort(r.end)}`)}${rs.length > 1 ? ` <span class="note">+${rs.length - 1} more</span>` : ""}</div>`; })()}
         <span class="more wxmore">Hour by hour →</span>
       </a>`).join("")}</div>
     </section>
     <div class="charts">${chartPanel("wxtemp", "Next 24 hours: temperature")}${chartPanel("wxrain", "Next 24 hours: chance of rain")}</div>`;
+}
+
+/* rain timing: windows come from the backend (hours >= 50% chance or >= 0.01 in) */
+const hShort = (ms) => { const d = new Date(ms); return d.getMinutes() ? hm(ms) : d.toLocaleTimeString("en-US", { hour: "numeric", hour12: true }); };
+function relDay(ms) {
+  const d = new Date(ms).toDateString(), t = new Date();
+  if (d === t.toDateString()) return "today";
+  t.setDate(t.getDate() + 1);
+  if (d === t.toDateString()) return "tomorrow";
+  return new Date(ms).toLocaleDateString("en-US", { weekday: "long" });
+}
+const rainLabel = (r) => (r.peak < 40 ? `Possible ${r.kind.toLowerCase()}` : r.kind);
+function rainWhen(r, withDay = true) {
+  const now = Date.now();
+  if (r.start <= now) return `now until ${hShort(r.end)}${relDay(r.end) !== "today" ? " " + relDay(r.end) : ""}`;
+  const a = withDay ? `${relDay(r.start)} ` : "", sameDay = new Date(r.start).toDateString() === new Date(r.end - 1).toDateString();
+  return `${a}${hShort(r.start)} – ${hShort(r.end)}${sameDay ? "" : " " + relDay(r.end)}`;
+}
+const rainDetail = (r) => `${r.peak}% chance at most${r.total >= 0.01 ? ` · about ${r.total.toFixed(2)} in` : ""} · ${r.hours} hour${r.hours > 1 ? "s" : ""}`;
+const upcomingRain = (w) => (w.rain_windows || []).filter((r) => r.end > Date.now());
+// windows overlapping [a, b), clipped to it
+// windows overlapping [a, b): start/end clipped to it (for shading), ostart/oend the real span (for labels)
+const rainIn = (w, a, b) => (w.rain_windows || []).filter((r) => r.end > a && r.start < b)
+  .map((r) => ({ ...r, ostart: r.start, oend: r.end, start: Math.max(r.start, a), end: Math.min(r.end, b) }));
+const wkday = (ms) => new Date(ms).toLocaleDateString("en-US", { weekday: "short" });
+// label for a window on one day's page: other days are named, e.g. "Thu 9 PM – 3 AM" or "9 PM – Fri 3 AM"
+function dayRainWhen(r, dayStart, dayEnd) {
+  const now = Date.now();
+  if (r.ostart <= now && r.oend > now) return `now until ${r.oend > dayEnd ? wkday(r.oend) + " " : ""}${hShort(r.oend)}`;
+  return `${r.ostart < dayStart ? wkday(r.ostart) + " " : ""}${hShort(r.ostart)} – ${r.oend > dayEnd ? wkday(r.oend) + " " : ""}${hShort(r.oend)}`;
 }
 
 const fmtDeg = (v) => (v == null ? "–" : `${Math.round(v)}°F`);
@@ -1370,8 +1429,9 @@ function weatherCharts(w, idx, t0, t1, prefix, feels) {
   const max = min + Math.ceil((Math.max(...all) + 2 - min) / 20) * 20;
   const series = [{ name: "Temperature", color: "var(--warn)", values: temp }];
   if (feels) series.push({ name: "Feels like", color: "var(--s2)", values: fl });
-  drawChart(prefix + "temp", t, series, fmtDeg, (v) => `${Math.round(v)}°`, { domain: [t0, t1], min, max });
-  drawChart(prefix + "rain", t, [{ name: "Chance of rain", color: "var(--accent)", values: pick(h.rain_chance, idx) }], fmtChance, (v) => `${Math.round(v)}%`, { domain: [t0, t1], max: 100 });
+  const bands = rainIn(w, t0, t1 + 3600e3).map((r) => [r.start, r.end]);
+  drawChart(prefix + "temp", t, series, fmtDeg, (v) => `${Math.round(v)}°`, { domain: [t0, t1], min, max, bands });
+  drawChart(prefix + "rain", t, [{ name: "Chance of rain", color: "var(--accent)", values: pick(h.rain_chance, idx) }], fmtChance, (v) => `${Math.round(v)}%`, { domain: [t0, t1], max: 100, bands });
 }
 
 function chartsWeather(w) {
@@ -1417,6 +1477,14 @@ function renderWeatherDay(w, i) {
       ${tile("Sunrise", hm(d.sunrise), `sunset ${hm(d.sunset)}`)}
       ${tile("UV index", d.uv != null ? d.uv.toFixed(1) : "–", d.uv >= 6 ? "high: wear sunscreen" : d.uv >= 3 ? "moderate" : "low")}
     </div>
+    <section class="panel">
+      <div class="panel-head"><h3>When it'll rain</h3><span class="meta">shaded on the graphs</span></div>
+      ${(() => { const { start, end } = dayHours(w, i), rs = rainIn(w, start, end);
+        return rs.length ? `<div class="rainlist">${rs.map((r) => `<div class="rainrow${r.oend <= now ? " pastrain" : ""}${r.peak < 40 ? " maybe" : ""}">
+            ${wxIcon(r.kind === "Thunderstorms" ? "storm" : r.kind === "Snow" ? "snow" : "rain", 26)}
+            <div><strong>${esc(rainLabel(r))}, ${esc(dayRainWhen(r, start, end))}${r.oend <= now ? " (earlier)" : ""}</strong><p class="note">${esc(rainDetail(r))}</p></div></div>`).join("")}</div>`
+          : `<p class="empty">No rain expected ${i === 0 ? "today" : "this day"}.</p>`; })()}
+    </section>
     <div class="charts">${chartPanel("wdtemp", "Temperature")}${chartPanel("wdrain", "Chance of rain")}</div>
     <section class="panel">
       <div class="panel-head"><h3>Hour by hour</h3><span class="meta">${idx.length} hours</span></div>

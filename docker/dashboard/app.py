@@ -605,8 +605,12 @@ WMO = {0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Cloudy", 45: "Fog"
 
 def weather():
     """The header's short version; same fetch as the Weather page, so the two always agree."""
-    c = forecast()["current"]
-    return {"temp": round(c["temp"]), "text": c["text"], "wind": round(c["wind"]), "humidity": c["humidity"], "place": WEATHER_NAME}
+    f = forecast()
+    c, now = f["current"], time.time() * 1000
+    # header note: only rain that's likely (>= 40%) within the next 12 hours
+    nxt = next((w for w in f["rain_windows"] if w["end"] > now and w["start"] < now + 12 * 3600_000 and w["peak"] >= 40), None)
+    return {"temp": round(c["temp"]), "text": c["text"], "wind": round(c["wind"]), "humidity": c["humidity"], "place": WEATHER_NAME,
+            "next_rain": nxt}
 
 
 def wmo_group(code):
@@ -629,6 +633,28 @@ def wmo_group(code):
 COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 
 
+def rain_windows(t, chance, amount, group):
+    """Stretches of rain: hours with a >= 50% chance or >= 0.01 in forecast. One dry hour inside a stretch
+    doesn't split it. Times are epoch ms; end is the end of the last wet hour."""
+    wet = [i for i in range(len(t)) if (chance[i] or 0) >= 50 or (amount[i] or 0) >= 0.01]
+    runs = []
+    for i in wet:
+        if runs and i - runs[-1][-1] <= 2:
+            runs[-1].append(i)
+        else:
+            runs.append([i])
+    out = []
+    for r in runs:
+        span = range(r[0], r[-1] + 1)
+        total = sum(amount[i] or 0 for i in span)
+        groups = {group[i] for i in span}
+        kind = ("Thunderstorms" if "storm" in groups else "Snow" if "snow" in groups
+                else "Light rain" if total < 0.05 else "Rain")
+        out.append({"start": t[r[0]], "end": t[r[-1]] + 3600_000, "kind": kind, "peak": max(chance[i] or 0 for i in span),
+                    "total": round(total, 2), "hours": len(span)})
+    return out
+
+
 def forecast():
     def load():
         q = urllib.parse.urlencode({
@@ -643,7 +669,9 @@ def forecast():
         with urllib.request.urlopen("https://api.open-meteo.com/v1/forecast?" + q, timeout=10) as r:
             j = json.load(r)
         c, d, h = j["current"], j["daily"], j["hourly"]
+        groups = [wmo_group(x) for x in h["weather_code"]]
         return {
+            "rain_windows": rain_windows([x * 1000 for x in h["time"]], h["precipitation_probability"], h["precipitation"], groups),
             "place": WEATHER_NAME, "updated": c["time"] * 1000,
             "current": {"temp": c["temperature_2m"], "feels": c["apparent_temperature"], "humidity": c["relative_humidity_2m"],
                         "code": c["weather_code"], "text": WMO.get(c["weather_code"], ""), "group": wmo_group(c["weather_code"]),
@@ -657,7 +685,7 @@ def forecast():
             # every hour of all 5 days (local midnight to midnight); the page picks out a day or the next 24 hours
             "hourly": {"t": [x * 1000 for x in h["time"]], "temp": h["temperature_2m"], "feels": h["apparent_temperature"],
                        "rain_chance": h["precipitation_probability"], "rain": h["precipitation"],
-                       "code": h["weather_code"], "group": [wmo_group(x) for x in h["weather_code"]],
+                       "code": h["weather_code"], "group": groups,
                        "text": [WMO.get(x, "") for x in h["weather_code"]], "wind": h["wind_speed_10m"],
                        "humidity": h["relative_humidity_2m"], "is_day": h["is_day"]},
         }
