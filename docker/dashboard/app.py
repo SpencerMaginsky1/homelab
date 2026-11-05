@@ -13,6 +13,7 @@ Serves:
   /api/server/<slug>        /api/monitor/<id>        /api/container/<slug>     (?range=1h|12h|24h|7d)
   /api/activity             the last 30 days of events
   /api/minecraft            server status, settings, players, backups
+  /api/weather              current conditions, 5-day forecast, next 24 hours
   /api/console/log          the Minecraft log from a byte position (needs the console password)
   POST /api/console/login | logout | command   (command goes to the console bridge on the host)
   /ping                     200 while the web server is up (Docker healthcheck)
@@ -603,15 +604,58 @@ WMO = {0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Cloudy", 45: "Fog"
 
 
 def weather():
+    """The header's short version; same fetch as the Weather page, so the two always agree."""
+    c = forecast()["current"]
+    return {"temp": round(c["temp"]), "text": c["text"], "wind": round(c["wind"]), "humidity": c["humidity"], "place": WEATHER_NAME}
+
+
+def wmo_group(code):
+    """Icon family for a WMO weather code."""
+    if code in (0, 1):
+        return "clear"
+    if code == 2:
+        return "partly"
+    if code == 3:
+        return "cloudy"
+    if code in (45, 48):
+        return "fog"
+    if 71 <= code <= 77 or code in (85, 86):
+        return "snow"
+    if code >= 95:
+        return "storm"
+    return "rain"
+
+
+COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+
+
+def forecast():
     def load():
-        q = urllib.parse.urlencode({"latitude": WEATHER_LAT, "longitude": WEATHER_LON,
-                                    "current": "temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m",
-                                    "temperature_unit": "fahrenheit", "wind_speed_unit": "mph"})
-        with urllib.request.urlopen("https://api.open-meteo.com/v1/forecast?" + q, timeout=8) as r:
-            cur = json.load(r)["current"]
-        return {"temp": round(cur["temperature_2m"]), "text": WMO.get(cur["weather_code"], ""), "wind": round(cur["wind_speed_10m"]),
-                "humidity": cur.get("relative_humidity_2m"), "place": WEATHER_NAME}
-    return cached("weather", 900, load)
+        q = urllib.parse.urlencode({
+            "latitude": WEATHER_LAT, "longitude": WEATHER_LON, "timezone": "America/New_York", "timeformat": "unixtime",
+            "temperature_unit": "fahrenheit", "wind_speed_unit": "mph", "precipitation_unit": "inch",
+            "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_gusts_10m,"
+                       "wind_direction_10m,pressure_msl,is_day",
+            "hourly": "temperature_2m,precipitation_probability,weather_code", "forecast_hours": 25,
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,"
+                     "wind_speed_10m_max,sunrise,sunset,uv_index_max", "forecast_days": 5})
+        with urllib.request.urlopen("https://api.open-meteo.com/v1/forecast?" + q, timeout=10) as r:
+            j = json.load(r)
+        c, d, h = j["current"], j["daily"], j["hourly"]
+        return {
+            "place": WEATHER_NAME, "updated": c["time"] * 1000,
+            "current": {"temp": c["temperature_2m"], "feels": c["apparent_temperature"], "humidity": c["relative_humidity_2m"],
+                        "code": c["weather_code"], "text": WMO.get(c["weather_code"], ""), "group": wmo_group(c["weather_code"]),
+                        "is_day": bool(c["is_day"]), "wind": c["wind_speed_10m"], "gusts": c["wind_gusts_10m"],
+                        "wind_dir": COMPASS[round(c["wind_direction_10m"] / 45) % 8], "pressure": c["pressure_msl"]},
+            "days": [{"t": d["time"][i] * 1000, "code": d["weather_code"][i], "text": WMO.get(d["weather_code"][i], ""),
+                      "group": wmo_group(d["weather_code"][i]), "high": d["temperature_2m_max"][i], "low": d["temperature_2m_min"][i],
+                      "rain_chance": d["precipitation_probability_max"][i], "rain": d["precipitation_sum"][i],
+                      "wind": d["wind_speed_10m_max"][i], "sunrise": d["sunrise"][i] * 1000, "sunset": d["sunset"][i] * 1000,
+                      "uv": d["uv_index_max"][i]} for i in range(len(d["time"]))],
+            "hourly": {"t": [x * 1000 for x in h["time"]], "temp": h["temperature_2m"], "rain_chance": h["precipitation_probability"]},
+        }
+    return cached("forecast", 900, load)
 
 
 # ---------------------------------------------------------------- activity (journal + Kuma)
@@ -1088,6 +1132,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, summary())
             if p == "/api/activity":
                 return self.send(200, activity_page())
+            if p == "/api/weather":
+                return self.send(200, forecast())
             if p == "/api/minecraft":
                 return self.send(200, minecraft_detail(self.authed()))
             if p == "/api/console/log":

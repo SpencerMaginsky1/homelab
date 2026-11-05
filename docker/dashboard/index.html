@@ -361,6 +361,48 @@ a.ev:hover strong { color: var(--accent); }
 .evlink strong { overflow-wrap: anywhere; font-weight: 600; }
 @media (max-width: 600px) { .evnav { grid-template-columns: minmax(0, 1fr); } .evlink:nth-child(2) { text-align: left; } }
 .names { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* weather */
+.wxlink:hover { color: var(--accent); }
+.wxlink:hover .num { text-decoration: underline; }
+.wxi { fill: none; stroke: var(--muted); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.wx-clear { stroke: var(--warn); } .wx-night { stroke: var(--s2); } .wx-rain, .wx-snow { stroke: var(--accent); } .wx-storm { stroke: var(--s2); }
+.wxnow { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px 40px; align-items: center; }
+.wxbig { display: flex; gap: 16px; align-items: center; }
+.wxtemp { font-size: 52px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.wxtemp small { font-size: 20px; color: var(--muted); font-weight: 500; vertical-align: top; margin-left: 1px; }
+.wxcond { font-size: 16px; font-weight: 600; margin: 6px 0 2px; }
+.wxnow .kv { grid-template-columns: repeat(2, auto auto); justify-content: start; gap: 6px 16px; }
+.wxnow .kv dd:nth-of-type(odd) { margin-right: 32px; }
+.wxdays { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.wxday { background: var(--sunk); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; min-width: 0; }
+.wxname { display: flex; flex-direction: column; }
+.wxtext { font-size: 13px; color: var(--muted); min-height: 2.6em; }
+.wxrange { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%; font-size: 14px; }
+.wxrange .hi { font-weight: 600; order: 3; } .wxrange .lo { color: var(--muted); order: 1; } .wxbar { order: 2; }
+.wxbar { position: relative; height: 5px; background: var(--track); border-radius: 3px; }
+.wxbar i { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: linear-gradient(90deg, var(--accent), var(--warn)); }
+.wxmeta { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.wxmeta .wet { color: var(--accent); font-weight: 600; }
+.wxmeta span { white-space: nowrap; }
+@media (max-width: 1000px) {
+  .wxnow { grid-template-columns: minmax(0, 1fr); }
+  .wxdays { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .wxday { display: grid; grid-template-columns: 92px 32px minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 4px 12px;
+           background: none; border-radius: 0; padding: 10px 0; border-top: 1px solid var(--line); }
+  .wxday:first-child { border-top: 0; }
+  .wxday .wxi { width: 30px; height: 30px; }
+  .wxtext { min-height: 0; }
+  .wxmeta { grid-column: 3 / -1; flex-direction: row; flex-wrap: wrap; gap: 2px 12px; }
+}
+@media (max-width: 600px) {
+  .wxnow .kv { grid-template-columns: auto minmax(0, 1fr); }
+  .wxnow .kv dd:nth-of-type(odd) { margin-right: 0; }
+  .wxday { grid-template-columns: 84px 30px minmax(0, 1fr); }
+  .wxday .wxrange { grid-column: 3; }
+  .wxday .wxtext { grid-column: 3; }
+  .wxtemp { font-size: 44px; }
+}
 .names span { background: var(--sunk); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; }
 
 @media (max-width: 1000px) {
@@ -686,7 +728,7 @@ function renderTop() {
   const up = S.monitors.filter((m) => m.status === 1).length;
   $("summary").innerHTML = `<span>${running}/${S.containers.length} containers</span><span>${up}/${S.monitors.length} monitors up</span>${S.uptime ? `<span>up ${fmtDur(S.uptime)}</span>` : ""}`;
   const w = S.weather;
-  $("wx").innerHTML = w ? `<span class="num">${w.temp}°F</span> ${esc(w.text.toLowerCase())}, ${esc(w.place)}` : "";
+  $("wx").innerHTML = w ? `<a class="wxlink" href="#weather" title="5-day forecast"><span class="num">${w.temp}°F</span> ${esc(w.text.toLowerCase())}, ${esc(w.place)}</a>` : "";
   const errs = Object.entries(S.errors || {});
   const items = h.items.filter((x) => x !== "Some data couldn't be loaded");
   const al = $("alerts");
@@ -759,33 +801,35 @@ function niceMax(v) {
   const p = 10 ** Math.floor(Math.log10(v)), f = v / p;
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
 }
-function axisLabel(ms) {
-  return range === "7d" ? new Date(ms).toLocaleDateString("en-US", { weekday: "short" }) : hm(ms);
+function axisLabel(ms, span) {
+  return span > 2 * 86400e3 ? new Date(ms).toLocaleDateString("en-US", { weekday: "short" }) : hm(ms);
 }
 const lastVal = (a) => { for (let i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return null; };
 
-// t: epoch-ms array; series: [{name, color, values}] (null = gap); fmt/axis: value formatters; opts: {max, marks}
+// t: epoch-ms array; series: [{name, color, values}] (null = gap); fmt/axis: value formatters;
+// opts: {max, min, marks, domain: [t0, t1]} (default domain: the selected range up to now)
 function drawChart(key, t, series, fmt, axis, opts = {}) {
   const box = $("c-" + key);
   if (!box) return;
   const w = Math.max(260, box.clientWidth), h = box.clientHeight || 180;
   const P = { l: 46, r: 10, t: 8, b: 22 };
-  const t1 = Date.now(), t0 = t1 - RANGES[range].span;
+  const [t0, t1] = opts.domain || [Date.now() - RANGES[range].span, Date.now()];
   const X = (tt) => P.l + ((tt - t0) / (t1 - t0)) * (w - P.l - P.r);
   const vals = series.flatMap((s) => s.values).filter((v) => v != null);
+  const bottom = opts.min ?? 0;
   const top = opts.max ?? niceMax((vals.length ? Math.max(...vals) : 1) * 1.12);
-  const Y = (v) => P.t + (1 - Math.min(v, top) / top) * (h - P.t - P.b);
+  const Y = (v) => P.t + (1 - (Math.min(v, top) - bottom) / (top - bottom)) * (h - P.t - P.b);
 
   let g = "";
   for (let k = 0; k <= 4; k++) {
-    const v = (top * k) / 4, yy = Y(v).toFixed(1);
+    const v = bottom + ((top - bottom) * k) / 4, yy = Y(v).toFixed(1);
     g += `<line x1="${P.l}" x2="${w - P.r}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-width="1"/>`;
     g += `<text x="${P.l - 6}" y="${yy}" text-anchor="end" dominant-baseline="middle">${axis(v)}</text>`;
   }
   const ticks = w < 480 ? 2 : 4;  // 12-hour labels are wide; a phone fits three
   for (let k = 0; k <= ticks; k++) {
     const tt = t0 + (k * (t1 - t0)) / ticks;
-    g += `<text x="${X(tt).toFixed(1)}" y="${h - 4}" text-anchor="${k === 0 ? "start" : k === ticks ? "end" : "middle"}">${axisLabel(tt)}</text>`;
+    g += `<text x="${X(tt).toFixed(1)}" y="${h - 4}" text-anchor="${k === 0 ? "start" : k === ticks ? "end" : "middle"}">${axisLabel(tt, t1 - t0)}</text>`;
   }
   const segs = (values) => {
     const out = []; let cur = [];
@@ -795,7 +839,7 @@ function drawChart(key, t, series, fmt, axis, opts = {}) {
   };
   const paths = series.map((s, si) => segs(s.values).map((seg) => {
     const d = seg.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
-    const area = si === 0 && seg.length > 1 ? `<path d="${d} L${seg[seg.length - 1][0].toFixed(1)} ${Y(0)} L${seg[0][0].toFixed(1)} ${Y(0)} Z" fill="${s.color}" fill-opacity="0.1"/>` : "";
+    const area = si === 0 && seg.length > 1 ? `<path d="${d} L${seg[seg.length - 1][0].toFixed(1)} ${Y(bottom)} L${seg[0][0].toFixed(1)} ${Y(bottom)} Z" fill="${s.color}" fill-opacity="0.1"/>` : "";
     const dot = seg.length === 1 ? `<circle cx="${seg[0][0]}" cy="${seg[0][1]}" r="2" fill="${s.color}"/>` : "";
     return area + `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="1.7" stroke-linejoin="round"/>` + dot;
   }).join("")).join("");
@@ -1234,6 +1278,71 @@ document.addEventListener("keydown", (e) => {
   e.target.value = term.hIdx < 0 ? "" : term.history[term.hIdx];
 });
 
+/* ---------- weather ---------- */
+
+const CLOUD = `<path d="M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.2 11.1 3.5 3.5 0 0 0 7 18z"/>`;
+const WX_ICON = {
+  clear: `<circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>`,
+  night: `<path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10z"/>`,
+  partly: `<path d="M8 2.5V4M2.5 8H4M4.1 4.1l1 1M11.9 4.1l-1 1"/><path d="M5.2 10.6A3.5 3.5 0 1 1 11.4 7.5"/><path d="M9 20h8a3.5 3.5 0 0 0 .5-6.96A5 5 0 0 0 8.4 13.6 3.2 3.2 0 0 0 9 20z"/>`,
+  cloudy: CLOUD,
+  fog: `<path d="M7 13h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.2 6.1 3.5 3.5 0 0 0 7 13z"/><path d="M4 17h16M7 20.5h10"/>`,
+  rain: `<path d="M7 14h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.2 7.1 3.5 3.5 0 0 0 7 14z"/><path d="M8 17l-1 3M12 17l-1 3M16 17l-1 3"/>`,
+  snow: `<path d="M7 14h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.2 7.1 3.5 3.5 0 0 0 7 14z"/><path d="M8 18h.01M12 18h.01M16 18h.01M10 21h.01M14 21h.01"/>`,
+  storm: `<path d="M7 14h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.2 7.1 3.5 3.5 0 0 0 7 14z"/><path d="M12.5 14l-2.5 4h3.5L11 22"/>`,
+};
+const wxIcon = (group, size, night) => {
+  const g = night && (group === "clear" || group === "partly") ? "night" : group;
+  return `<svg class="wxi wx-${g}" viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">${WX_ICON[g] || WX_ICON.cloudy}</svg>`;
+};
+const deg = (v) => (v == null ? "–" : `${Math.round(v)}°`);
+const dayLabel = (ms, i) => (i === 0 ? "Today" : i === 1 ? "Tomorrow" : new Date(ms).toLocaleDateString("en-US", { weekday: "long" }));
+
+function renderWeather(w) {
+  const c = w.current, today = w.days[0] || {};
+  const lo = Math.min(...w.days.map((d) => d.low)), hi = Math.max(...w.days.map((d) => d.high));
+  const pos = (v) => ((v - lo) / Math.max(1, hi - lo)) * 100;
+  $("view-detail").innerHTML = `${crumb}
+    <div class="dhead">
+      <div>
+        <h2>Weather</h2>
+        <div class="specs"><span>${esc(w.place)}</span><span>updated ${esc(hm(w.updated))}</span><span>from Open-Meteo</span></div>
+      </div>
+    </div>
+    <section class="panel wxnow">
+      <div class="wxbig">${wxIcon(c.group, 64, !c.is_day)}<div><div class="wxtemp">${deg(c.temp)}<small>F</small></div><div class="wxcond">${esc(c.text)}</div>
+        <div class="note">High ${deg(today.high)} · Low ${deg(today.low)}</div></div></div>
+      <dl class="kv">
+        <dt>Feels like</dt><dd class="num">${deg(c.feels)}</dd>
+        <dt>Humidity</dt><dd class="num">${c.humidity}%</dd>
+        <dt>Wind</dt><dd class="num">${Math.round(c.wind)} mph ${esc(c.wind_dir)}, gusts ${Math.round(c.gusts)}</dd>
+        <dt>Pressure</dt><dd class="num">${Math.round(c.pressure)} hPa</dd>
+        <dt>Sunrise</dt><dd class="num">${today.sunrise ? esc(hm(today.sunrise)) : "–"}</dd>
+        <dt>Sunset</dt><dd class="num">${today.sunset ? esc(hm(today.sunset)) : "–"}</dd>
+        <dt>UV index</dt><dd class="num">${today.uv != null ? today.uv.toFixed(1) : "–"} max today</dd>
+      </dl>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h3>5-day forecast</h3><span class="meta">high · low · chance of rain</span></div>
+      <div class="wxdays">${w.days.map((d, i) => `<div class="wxday">
+        <div class="wxname"><strong>${esc(dayLabel(d.t, i))}</strong><span class="note">${esc(new Date(d.t).toLocaleDateString("en-US", { month: "short", day: "numeric" }))}</span></div>
+        ${wxIcon(d.group, 40)}
+        <div class="wxtext">${esc(d.text)}</div>
+        <div class="wxrange"><span class="num hi">${deg(d.high)}</span><div class="wxbar"><i style="left:${pos(d.low)}%;right:${100 - pos(d.high)}%"></i></div><span class="num lo">${deg(d.low)}</span></div>
+        <div class="wxmeta num"><span class="${d.rain_chance >= 50 ? "wet" : ""}">${d.rain_chance ?? 0}% rain${d.rain >= 0.01 ? ` · ${d.rain.toFixed(2)} in` : ""}</span><span>wind ${Math.round(d.wind)} mph</span></div>
+      </div>`).join("")}</div>
+    </section>
+    <div class="charts">${chartPanel("wxtemp", "Next 24 hours: temperature")}${chartPanel("wxrain", "Next 24 hours: chance of rain")}</div>`;
+}
+
+function chartsWeather(w) {
+  const h = w.hourly, dom = [h.t[0], h.t[h.t.length - 1]];
+  const temps = h.temp.filter((v) => v != null);
+  const min = Math.floor((Math.min(...temps) - 3) / 5) * 5, max = Math.ceil((Math.max(...temps) + 3) / 5) * 5;
+  drawChart("wxtemp", h.t, [{ name: "Temperature", color: "var(--warn)", values: h.temp }], (v) => (v == null ? "–" : `${Math.round(v)}°F`), (v) => `${Math.round(v)}°`, { domain: dom, min, max });
+  drawChart("wxrain", h.t, [{ name: "Chance of rain", color: "var(--accent)", values: h.rain_chance }], (v) => (v == null ? "–" : `${Math.round(v)}%`), (v) => `${Math.round(v)}%`, { domain: dom, max: 100 });
+}
+
 /* ---------- loading and routing ---------- */
 
 function drawCharts() {
@@ -1241,12 +1350,13 @@ function drawCharts() {
   if (current.type === "server") chartsServer(detail);
   else if (current.type === "monitor") chartsMonitor(detail);
   else if (current.type === "container") chartsContainer(detail);
+  else if (current.type === "weather") chartsWeather(detail);
 }
 
 async function loadDetail(quiet) {
   const cur = current;
   if (!cur) return;
-  const path = cur.type === "activity" ? "/api/activity" : cur.type === "minecraft" ? "/api/minecraft" : `/api/${cur.type}/${cur.key}?range=${range}`;
+  const path = ["activity", "minecraft", "weather"].includes(cur.type) ? `/api/${cur.type}` : `/api/${cur.type}/${cur.key}?range=${range}`;
   if (!quiet) { $("view-detail").innerHTML = `${crumb}<p class="loading">Loading…</p>`; detailSig = ""; }
   try {
     const data = await api(path);
@@ -1260,6 +1370,7 @@ async function loadDetail(quiet) {
     else if (cur.type === "container") renderContainer(data);
     else if (cur.type === "minecraft") renderMinecraft(data, quiet);
     else if (cur.type === "event") renderEvent(data);
+    else if (cur.type === "weather") renderWeather(data);
     else renderActivity(data);
     if (open.length) document.querySelectorAll("#view-detail .ev details").forEach((d) => { if (open.includes(d.closest(".ev").textContent.slice(0, 80))) d.open = true; });
     drawCharts();
@@ -1282,7 +1393,7 @@ async function refreshSummary() {
 function route() {
   const h = location.hash.slice(1);
   const m = h.match(/^(server|monitor|container|event)-([a-z0-9-]+)$/);
-  current = h === "activity" || h === "minecraft" ? { type: h } : m ? { type: m[1], key: m[2] } : null;
+  current = ["activity", "minecraft", "weather"].includes(h) ? { type: h } : m ? { type: m[1], key: m[2] } : null;
   detail = null;
   stopConsole();
   const tab = !current ? "home" : current.type === "server" ? "server" : current.type === "minecraft" ? "minecraft"
