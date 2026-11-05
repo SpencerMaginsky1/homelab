@@ -460,7 +460,7 @@ def rollbacks(name, image):
                 if len(parts) == 3 and parts[1] == name:
                     svc = parts[0]
                     try:
-                        label = datetime.strptime(parts[2], "%Y%m%d-%H%M%S").strftime("%b %-d, %H:%M")
+                        label = datetime.strptime(parts[2], "%Y%m%d-%H%M%S").strftime("%b %-d, %-I:%M %p")
                     except ValueError:
                         label = parts[2]
                     out.append({"label": label, "key": parts[2], "size": im.get("Size")})

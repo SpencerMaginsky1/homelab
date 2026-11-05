@@ -501,8 +501,13 @@ function fmtDur(sec) {
   if (sec < 172800) return `${Math.floor(sec / 3600)} h ${Math.floor((sec % 3600) / 60)} min`;
   return `${Math.floor(sec / 86400)} d ${Math.floor((sec % 86400) / 3600)} h`;
 }
-const hm = (ms) => new Date(ms).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-const hms = (ms) => new Date(ms).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+const hm = (ms) => new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+// padded so log timestamps line up whether the hour has one digit or two
+const hms = (ms) => new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true }).padStart(11);
+function to12(s) {  // "HH:MM:SS" from the Minecraft log -> "h:MM:SS AM"
+  const [h, m, sec] = s.split(":").map(Number);
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")}${Number.isNaN(sec) || sec == null ? "" : ":" + String(sec).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
 function dayName(ms) {
   const d = new Date(ms), t = new Date();
   const y = new Date(); y.setDate(t.getDate() - 1);
@@ -578,7 +583,7 @@ const linkLabel = (l) => (l.startsWith("#monitor-") ? "Open the monitor →" : l
 
 function renderEvent(e) {
   const [sevText, sevCls] = SEV[e.sev] || SEV.info;
-  const full = new Date(e.t).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  const full = new Date(e.t).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
   const cmd = ([e.body, ...e.lines.map((l) => l.text)].join("\n").match(/sudo [a-z0-9_-]+(?: [A-Za-z0-9_.@:\/-]+)*/) || [])[0];
   const groups = e.cat === "report" ? [["bad", "Problems"], ["warn", "Heads up"], ["ok", "Passed"]] : [["", "Details"]];
   const lists = groups.map(([s, label]) => {
@@ -882,7 +887,7 @@ function renderContainer(c) {
     c.health === "healthy" ? ["Passing", `every ${c.check_interval || 30} s`, "ok"] :
     c.health === "starting" ? ["Starting", "waiting for the first check", "warn"] :
     [`Failing`, `${c.failing || 0} failures in a row`, "bad"];
-  const logs = c.logs.map((l) => `<span class="ts">${l.t ? esc(hms(l.t)) : "        "}</span>  <span class="${l.stream === "err" ? "err" : ""}">${esc(l.msg)}</span>`).join("\n");
+  const logs = c.logs.map((l) => `<span class="ts">${l.t ? esc(hms(l.t)) : " ".repeat(11)}</span>  <span class="${l.stream === "err" ? "err" : ""}">${esc(l.msg)}</span>`).join("\n");
   $("view-detail").innerHTML = `${crumb}
     <div class="dhead">
       <div>
@@ -1027,7 +1032,7 @@ function renderMinecraft(d, quiet) {
         <dt>Banned</dt><dd>${d.banned}</dd>
       </dl>
       <div class="panel-head"><h3>Today</h3><span class="meta">joins and leaves</span></div>
-      ${today.length ? `<div class="rb">${today.slice(0, 12).map((j) => `<div><span>${esc(j.name)} ${j.event === "joined" ? "joined" : "left"}</span><span class="num">${esc(j.time)}</span></div>`).join("")}</div>` : `<p class="empty">Nobody has played today.</p>`}
+      ${today.length ? `<div class="rb">${today.slice(0, 12).map((j) => `<div><span>${esc(j.name)} ${j.event === "joined" ? "joined" : "left"}</span><span class="num">${esc(to12(j.time))}</span></div>`).join("")}</div>` : `<p class="empty">Nobody has played today.</p>`}
     </section>
     <div class="stack span-7">
       <section class="panel">
@@ -1083,7 +1088,7 @@ function termLine(text) {
   if (!m) return `<div class="tl cont">${esc(text)}</div>`;
   const msg = m[4];
   const kind = /^<[^>]+> /.test(msg) ? " chat" : / (joined|left) the game$/.test(msg) ? " join" : "";
-  return `<div class="tl lv-${esc(m[3])}${kind}"><span class="tt">${esc(m[1])}</span> <span class="tm">${esc(msg)}</span></div>`;
+  return `<div class="tl lv-${esc(m[3])}${kind}"><span class="tt">${esc(to12(m[1]).padStart(11))}</span> <span class="tm">${esc(msg)}</span></div>`;
 }
 
 function termAppend(html) {
