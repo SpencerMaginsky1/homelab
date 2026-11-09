@@ -1213,7 +1213,8 @@ def summary():
         "minecraft": section(errors, "minecraft", minecraft),
         "weather": section(errors, "weather", weather),
         "lights": lights(),
-        "activity": [brief(e) for e in events[:5]], "waiting": activity_summary(events)["waiting"],
+        "activity": [brief(e) for e in events[:12]],  # 5 in the card, 12 in the wide-screen sidebar
+        "waiting": activity_summary(events)["waiting"],
         "errors": errors,
     }
 

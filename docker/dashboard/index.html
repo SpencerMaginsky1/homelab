@@ -144,6 +144,18 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .panel-head a.meta.go { color: var(--accent); font-weight: 600; }
 .stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
+/* wide screens: use the spare width for an Activity sidebar next to the two columns */
+.side { display: none; }
+@media (min-width: 1720px) {
+  .wrap { max-width: 1696px; }
+  .home-grid { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr) 360px; }
+  .home-grid > .span-7, .home-grid > .span-5 { grid-column: auto; }
+  .side { display: block; min-width: 0; }
+  .side #activity-panel { position: sticky; top: 16px; max-height: calc(100vh - 32px); }
+  .side .feed { overflow-y: auto; min-height: 0; margin-right: -8px; padding-right: 8px; }
+  .side .ev { grid-template-columns: 62px 4px minmax(0, 1fr); gap: 8px; }
+}
+
 /* lights (Kasa plugs): one big switch per lamp */
 .lights { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
 .light {
@@ -621,6 +633,9 @@ a.rainrow:hover strong { color: var(--accent); }
           <div class="feed" id="feed"></div>
         </section>
       </div>
+
+      <!-- wide screens only: Activity moves here (placeActivity) -->
+      <aside class="side" id="side"></aside>
     </main>
   </div>
 
@@ -887,8 +902,19 @@ function renderHome() {
 
   renderLights();
   $("waiting").innerHTML = waitingHtml(S.waiting || []);
-  $("feed").innerHTML = S.activity.map((e) => evRow(e, false)).join("") || `<p class="empty">Nothing in the last 30 days.</p>`;
+  $("feed").innerHTML = S.activity.slice(0, wideMQ.matches ? 12 : 5).map((e) => evRow(e, false)).join("") || `<p class="empty">Nothing in the last 30 days.</p>`;
 }
+
+/* ---------- activity sidebar (wide screens) ---------- */
+
+const wideMQ = matchMedia("(min-width: 1720px)");
+function placeActivity() {
+  const p = $("activity-panel"), home = $("mc-panel").parentNode;
+  if (wideMQ.matches) { if (p.parentNode !== $("side")) $("side").appendChild(p); }
+  else if (p.parentNode !== home) home.appendChild(p);
+}
+wideMQ.addEventListener("change", () => { placeActivity(); if (S && !current) renderHome(); });
+placeActivity();
 
 /* ---------- lights ---------- */
 
