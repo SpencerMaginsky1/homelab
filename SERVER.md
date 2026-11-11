@@ -576,7 +576,7 @@ Leave the policy-routing dispatcher in place unless you also remove whatever nee
   1. ~~Test the Minecraft console end to end.~~ Done 2026-11-05 18:15: **list** works from the dashboard. It first failed with "isn't running in its tmux session" because `start.sh` runs Java as a child, so tmux names the pane `sh`; the bridge now checks for Java in the pane's foreground job instead.
   2. ~~Check the phone layout on a real phone~~ Done 2026-11-05: looks and works fine on Spencer's phone.
   3. Homarr retirement below.
-  5. **Lock screen (2026-11-11): set the password** with `bash ~/Desktop/docker/dashboard/set-password.sh` (this also builds and deploys the lock-screen code). Then check: page asks for the password, wrong one is refused, Lock button works, and it locks again after 10 idle minutes.
+  5. ~~Lock screen: set the password~~ Done 2026-11-11: password set by Spencer, unlock confirmed in the browser; server answers 401 to the API and the lights until unlocked.
   4. **Reserve the light plugs' IPs** in the router (Desk Lamp `192.168.1.184` / 00-00-5E-00-53-01, Couch Lamp `192.168.1.185` / 00-00-5E-00-53-02). If either one gets a new IP, its switch shows "Not answering" until `KASA_HOSTS` is updated.
 - [x] ~~**Dashboard (3.14):** Kuma HTTP monitors **Dashboard** (`http://127.0.0.1:7576/ping`) and **Plex** (`http://127.0.0.1:32400/identity`)~~ added 2026-11-05: 60 s checks, ntfy alerts on, both on the `home` status page (9 monitors, all up). Plex's link dot is now green.
 - [ ] **Retire Homarr** once the dashboard has proven itself: `cd ~/Desktop/docker/homarr && docker compose down`, remove it from `homelab-updater`, Kuma and the health check's web UI list, and drop the `br-homarr` ufw rules (4.4).
