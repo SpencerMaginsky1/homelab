@@ -243,7 +243,7 @@ td.r, th.r { text-align: right; }
 .pill.bad { background: var(--bad-soft); color: var(--bad); }
 .pill.idle { background: var(--sunk); color: var(--muted); }
 .pill .dot { width: 6px; height: 6px; }
-.ram { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.ram { display: flex; align-items: center; gap: 8px; justify-content: flex-end; white-space: nowrap; }
 .ram .bar { width: 64px; height: 5px; }
 .hot { color: var(--warn); font-weight: 500; }
 .empty { color: var(--muted); font-size: 13px; padding: 8px 0; margin: 0; }
@@ -312,6 +312,7 @@ a.ev:hover strong { color: var(--accent); }
 .stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; min-width: 0; }
 .stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); font-weight: 600; }
 .stat .v { font-size: 22px; font-weight: 500; margin-top: 4px; line-height: 1.2; overflow-wrap: anywhere; }
+.stat .v.txt { font-size: 16px; font-weight: 600; line-height: 1.3; margin-top: 6px; }
 .stat .v.warn { color: var(--warn); } .stat .v.bad { color: var(--bad); } .stat .v.ok { color: var(--ok); }
 .stat .s { font-size: 12px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
 .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
@@ -531,7 +532,7 @@ a.rainrow:hover strong { color: var(--accent); }
   .clock .time { font-size: 18px; }
   .link .port { display: none; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ev { grid-template-columns: 58px 4px minmax(0, 1fr); }
+  .ev { grid-template-columns: 68px 4px minmax(0, 1fr); }
   .ev .src { grid-column: 3; grid-row: 2; width: fit-content; }
 }
 /* bottom tab bar: phones only */
@@ -539,13 +540,13 @@ a.rainrow:hover strong { color: var(--accent); }
 @media (max-width: 700px) {
   body { padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
   .tabbar {
-    display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    display: grid; grid-template-columns: repeat(6, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
     background: var(--surface); border-top: 1px solid var(--line);
     padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
   }
   .tabbar a {
     display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 0; border-radius: 8px;
-    font-size: 11px; font-weight: 600; color: var(--muted);
+    font-size: 10.5px; font-weight: 600; color: var(--muted); min-width: 0; white-space: nowrap;
   }
   .tabbar a[aria-current="page"] { color: var(--accent); }
   .tabbar svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -571,7 +572,8 @@ a.rainrow:hover strong { color: var(--accent); }
   .wrap { gap: 12px; }
   .host { gap: 8px 10px; }
   .host h1 { font-size: 20px; }
-  .summary { font-size: 12px; width: 100%; }
+  .summary { font-size: 12px; width: 100%; display: flex; flex-wrap: wrap; gap: 2px 12px; }
+  .summary span + span::before { content: none; }
   .clock { gap: 10px; font-size: 13px; }
   #date { display: none; }
   .panel { padding: 14px; }
@@ -703,7 +705,8 @@ a.rainrow:hover strong { color: var(--accent); }
   <a href="#" data-tab="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</a>
   <a href="#server-spencer-server" data-tab="server" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>Servers</a>
   <a href="#weather" data-tab="weather"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2.5V4M2.5 8H4M4.1 4.1l1 1M11.9 4.1l-1 1"/><path d="M5.2 10.6A3.5 3.5 0 1 1 11.4 7.5"/><path d="M9 20h8a3.5 3.5 0 0 0 .5-6.96A5 5 0 0 0 8.4 13.6 3.2 3.2 0 0 0 9 20z"/></svg>Weather</a>
-  <a href="#minecraft" data-tab="minecraft"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l6-6-6-6M12 19h8"/></svg>Minecraft</a>
+  <a href="#minecraft" data-tab="minecraft"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 20.5 7v10L12 21.5 3.5 17V7z"/><path d="M3.5 7 12 11.5 20.5 7M12 11.5v10"/></svg>Minecraft</a>
+  <a href="#terminal" data-tab="terminal"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="16" rx="2"/><path d="M7 9.5l3 2.5-3 2.5M12.5 15h4.5"/></svg>Terminal</a>
   <a href="#activity" data-tab="activity"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Activity</a>
 </nav>
 
@@ -795,7 +798,7 @@ const ago = (ms) => (ms ? `${fmtDur((Date.now() - ms) / 1000)} ago` : "–");
 /* ---------- shared bits ---------- */
 
 const crumb = `<a class="crumb" href="#">← Dashboard</a>`;
-const tile = (k, v, s, cls = "") => `<div class="stat"><div class="k">${k}</div><div class="v num ${cls}">${esc(v)}</div><div class="s">${esc(s)}</div></div>`;
+const tile = (k, v, s, cls = "") => `<div class="stat"><div class="k">${k}</div><div class="v ${/[a-z]{3}.* /i.test(String(v)) ? "txt" : "num"} ${cls}">${esc(v)}</div><div class="s">${esc(s)}</div></div>`;
 const chartPanel = (key, title, tall) => `<section class="panel"><div class="panel-head"><h3>${title}</h3><div class="keys" id="k-${key}"></div></div><div class="chart${tall ? " tall" : ""}" id="c-${key}"></div></section>`;
 const tabs = () => `<div class="tabs" role="tablist" aria-label="Time range">${Object.entries(RANGES).map(([r, o]) =>
   `<button type="button" role="tab" data-range="${r}" aria-selected="${r === range}">${o.label}</button>`).join("")}</div>`;
@@ -1750,7 +1753,7 @@ function route() {
   stopConsole();
   stopShell();
   closeSheet();
-  const tab = !current ? "home" : current.type === "server" ? "server" : current.type === "minecraft" ? "minecraft"
+  const tab = !current ? "home" : current.type === "server" ? "server" : current.type === "minecraft" ? "minecraft" : current.type === "terminal" ? "terminal"
     : current.type === "weather" || current.type === "weatherday" ? "weather"
     : current.type === "activity" || current.type === "event" ? "activity" : "";
   document.querySelectorAll(".tabbar a").forEach((a) => { if (a.dataset.tab === tab) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
