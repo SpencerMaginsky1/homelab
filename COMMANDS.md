@@ -136,7 +136,7 @@ tmux send-keys -t minecraft "stop" Enter            # wait until the console sho
 tmux send-keys -t minecraft "cd '/home/spencer/Desktop/MineCraft Server' && ./start.sh" Enter
 rm ~/.homelab-maintenance
 ```
-**Change the RAM:** edit `-Xms6G -Xmx6G` in `~/Desktop/MineCraft Server/start.sh`, then restart as above. The 8 GB original is saved as `start.sh.bak-8G`.
+**Change the RAM:** edit `-Xms4G -Xmx4G` in `~/Desktop/MineCraft Server/start.sh`, then restart as above. The older versions are saved as `start.sh.bak-6G` and `start.sh.bak-8G`.
 
 ## 8. DuckDNS
 `example.duckdns.org`, updated every 5 min, see README 3.8.
