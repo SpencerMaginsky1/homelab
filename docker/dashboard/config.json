@@ -1,6 +1,5 @@
 {
   "apps": [
-    { "name": "Homarr", "port": 7575, "monitor": "Homarr" },
     { "name": "Uptime Kuma", "port": 3001, "check": "kuma" },
     { "name": "Beszel", "port": 8090, "check": "beszel" },
     { "name": "Dawarich", "port": 3000, "monitor": "Dawarich" },

@@ -94,7 +94,7 @@ All times are New York time. Every push goes to the same private ntfy topic, and
 ### 3.1 Homarr (retired 2026-11-11)
 - Replaced by the custom dashboard (3.14, :7576). Containers `homarr` and `docker-proxy` and the `br-homarr` network were removed, along with the image and its updater rollback copies. It's no longer in the updater, health check, watchdog, Uptime Kuma or ufw.
 - **Archive:** `~/Desktop/docker/_retired/homarr-2026-11-11/` holds `compose.yml`, `.env` (`SECRET_ENCRYPTION_KEY`, needed to decrypt the saved integrations) and `appdata/` (board, integrations). To bring it back: move the folder back to `~/Desktop/docker/homarr`, `docker compose up -d`, then re-add the `br-homarr` ufw rules and the updater, health check, watchdog and Kuma entries (see git history in `homelab-private`). Delete the archive once you're sure you won't want it.
-- The "VS Code (Server)" tile it had (`vscode://vscode-remote/ssh-remote+spencer-server/home/spencer/Desktop/Claude`) can be added to the dashboard's quick links if you miss it.
+- Its link in the dashboard's top bar was removed from `config.json` the same day. The "VS Code (Server)" tile it had is already a dashboard shortcut.
 
 ### 3.2 Uptime Kuma (monitoring)
 - Image `louislam/uptime-kuma:2`, `network_mode: host`, data in `./data` (SQLite).
