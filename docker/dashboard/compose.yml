@@ -1,5 +1,5 @@
 # Homelab dashboard (README 3.14). Reads Beszel, Uptime Kuma and the system journal read-only,
-# and Docker through its own read-only proxy. Writes only to the Minecraft console bridge and the Kasa light plugs.
+# and Docker through its own read-only proxy. Writes only to the Minecraft console bridge, the terminal bridge (a shell, behind its own password) and the Kasa light plugs.
 networks:
   dashboard:
     driver_opts:
@@ -23,8 +23,8 @@ services:
       - /var/log/journal:/var/log/journal:ro
       - ./config.json:/app/config.json:ro   # links and shortcuts; edit, then `docker compose restart`
       - /home/spencer/Desktop/MineCraft Server:/data/minecraft:ro   # log, settings, ops/whitelist
-      - ./run:/run/mc-console:ro            # console bridge socket (console-bridge/, a systemd user service)
-    env_file: .env           # DASHBOARD_PASSWORD_HASH (set-password.sh), CONSOLE_PASSWORD, KASA_USERNAME, KASA_PASSWORD (owner-only file)
+      - ./run:/run/mc-console:ro            # bridge sockets: mc-console.sock + term.sock (console-bridge/, systemd user services)
+    env_file: .env           # DASHBOARD_ / TERMINAL_ / CONSOLE_PASSWORD_HASH (set-password.sh), KASA_USERNAME, KASA_PASSWORD (owner-only file)
     environment:
       HOST_IP: 192.168.1.179
       MC_ADDRESS: example.duckdns.org

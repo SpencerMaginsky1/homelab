@@ -24,13 +24,20 @@ Lock screen: every /api/ route except /api/auth/* needs the dashboard password (
 the page reports activity with POST /api/auth/active, and its own background refreshes don't count.
   GET  /api/auth/status     {"authed", "configured", "idle_minutes"}
   POST /api/auth/login {"password"} | logout | active
+Terminal (a shell as spencer through term-bridge on the host; its own password, TERMINAL_PASSWORD_HASH):
+  GET  /api/terminal        {"configured", "unlocked", "bridge", "session"}
+  POST /api/terminal/login {"password"} | lock
+  GET  /api/terminal/ws     WebSocket: binary frames = terminal bytes both ways; text {"resize": [cols, rows]}
+  The terminal unlock belongs to the dashboard session, so it ends when the dashboard locks.
 """
+import base64
 import hashlib
 import hmac
 import json
 import secrets
 import os
 import re
+import select
 import socket
 import sqlite3
 import struct
@@ -56,8 +63,11 @@ WEATHER_LON = os.environ.get("WEATHER_LON", "-74.00597")
 WEATHER_NAME = os.environ.get("WEATHER_NAME", "New York")
 MC_DIR = os.environ.get("MC_DIR", "/data/minecraft")
 MC_SOCK = os.environ.get("MC_SOCK", "/run/mc-console/mc-console.sock")
-CONSOLE_PASSWORD = os.environ.get("CONSOLE_PASSWORD", "")
+CONSOLE_PASSWORD_HASH = os.environ.get("CONSOLE_PASSWORD_HASH", "").strip()   # set-password.sh console
+CONSOLE_PASSWORD = "" if CONSOLE_PASSWORD_HASH else os.environ.get("CONSOLE_PASSWORD", "")   # old plain-text setting
 DASHBOARD_PASSWORD_HASH = os.environ.get("DASHBOARD_PASSWORD_HASH", "").strip()   # scrypt:n:r:p:salt:hash (hex)
+TERMINAL_PASSWORD_HASH = os.environ.get("TERMINAL_PASSWORD_HASH", "").strip()
+TERM_SOCK = os.environ.get("TERM_SOCK", "/run/mc-console/term.sock")
 LOCK_IDLE_MINUTES = max(1, int(os.environ.get("LOCK_IDLE_MINUTES", "10")))
 KASA_HOSTS = [h.strip() for h in os.environ.get("KASA_HOSTS", "").split(",") if h.strip()]
 KASA_USERNAME = os.environ.get("KASA_USERNAME", "")
@@ -1096,7 +1106,7 @@ def minecraft_detail(authed):
         "banned": len(mc_names("banned-players.json")) + len(mc_names("banned-ips.json")),
         "world_size": section(errors, "world", world_size), "today": todays_players(),
         "monitor": {k: kd[k] for k in ("id", "uptime24", "uptime7", "uptime30", "outages")} if kd else None,
-        "backups": backups, "authed": authed, "console_ready": bool(CONSOLE_PASSWORD), "bridge": os.path.exists(MC_SOCK),
+        "backups": backups, "authed": authed, "console_ready": bool(CONSOLE_PASSWORD_HASH or CONSOLE_PASSWORD), "bridge": os.path.exists(MC_SOCK),
         "errors": errors,
     }
 
@@ -1137,6 +1147,7 @@ def console_send(cmd):
 
 _sessions, _fails, _auth_lock = {}, {}, threading.Lock()
 _dash_sessions = {}   # token -> time of the last real user activity
+_term_unlocked = set()   # dashboard session tokens that have also entered the terminal password
 
 
 def _too_many(key, now):
@@ -1151,15 +1162,19 @@ def _failed(key, now):
         _fails.setdefault(key, []).append(now)
 
 
-def check_dashboard_password(password):
+def check_password(stored, password, name):
     try:
-        _, n, r, p, salt, want = DASHBOARD_PASSWORD_HASH.split(":")
+        _, n, r, p, salt, want = stored.split(":")
         got = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=int(n), r=int(r), p=int(p),
                              maxmem=128 * 1024 * 1024, dklen=len(want) // 2)
         return hmac.compare_digest(got, bytes.fromhex(want))
     except ValueError:
-        log("lock: DASHBOARD_PASSWORD_HASH is malformed; run set-password.sh again")
+        log(f"lock: {name} is malformed; run set-password.sh again")
         return False
+
+
+def check_dashboard_password(password):
+    return check_password(DASHBOARD_PASSWORD_HASH, password, "DASHBOARD_PASSWORD_HASH")
 
 
 def dash_login(ip, password):
@@ -1175,6 +1190,7 @@ def dash_login(ip, password):
     with _auth_lock:
         for k in [k for k, t in _dash_sessions.items() if now - t > LOCK_IDLE_MINUTES * 60]:
             del _dash_sessions[k]
+            _term_unlocked.discard(k)
         _dash_sessions[tok] = now
     return tok, None
 
@@ -1187,19 +1203,105 @@ def dash_authed(tok, touch=False):
             return False
         if now - last > LOCK_IDLE_MINUTES * 60:
             del _dash_sessions[tok]
+            _term_unlocked.discard(tok)
             return False
         if touch:
             _dash_sessions[tok] = now
         return True
 
 
+def term_login(ip, dash_tok, password):
+    now = time.time()
+    if _too_many(("term", ip), now):
+        return "Too many wrong passwords. Try again in 5 minutes."
+    if not TERMINAL_PASSWORD_HASH:
+        return "No terminal password is set yet. On the server run: bash ~/Desktop/docker/dashboard/set-password.sh terminal"
+    if not check_password(TERMINAL_PASSWORD_HASH, password, "TERMINAL_PASSWORD_HASH"):
+        _failed(("term", ip), now)
+        return "Wrong password."
+    with _auth_lock:
+        _term_unlocked.add(dash_tok)
+    return None
+
+
+def term_authed(dash_tok):
+    if not dash_authed(dash_tok):
+        return False
+    with _auth_lock:
+        return dash_tok in _term_unlocked
+
+
+def term_bridge(req, timeout=5):
+    """Opens a connection to term-bridge and sends the first request line. Returns the socket."""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    s.connect(TERM_SOCK)
+    s.sendall((json.dumps(req) + "\n").encode())
+    return s
+
+
+def read_line(s, limit=4096):
+    line = b""
+    while not line.endswith(b"\n") and len(line) < limit:
+        chunk = s.recv(1)
+        if not chunk:
+            break
+        line += chunk
+    return line
+
+
+def terminal_status(dash_tok):
+    out = {"configured": bool(TERMINAL_PASSWORD_HASH), "unlocked": term_authed(dash_tok), "bridge": False, "session": False}
+    try:
+        with closing(term_bridge({"op": "status"})) as s:
+            r = json.loads(read_line(s) or b"{}")
+        out["bridge"], out["session"] = bool(r.get("ok")), bool(r.get("session"))
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+# --- minimal WebSocket server side (RFC 6455), enough for one terminal stream
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def ws_read_frame(rfile):
+    """Returns (opcode, payload) or None when the browser went away."""
+    head = rfile.read(2)
+    if len(head) < 2:
+        return None
+    opcode, masked, n = head[0] & 0x0F, head[1] & 0x80, head[1] & 0x7F
+    if n == 126:
+        n = struct.unpack(">H", rfile.read(2))[0]
+    elif n == 127:
+        n = struct.unpack(">Q", rfile.read(8))[0]
+    if not masked or n > 1 << 20:   # browsers always mask; anything huge is not a keystroke
+        return None
+    mask = rfile.read(4)
+    data = bytearray(rfile.read(n))
+    if len(data) < n:
+        return None
+    for i in range(n):
+        data[i] ^= mask[i & 3]
+    return opcode, bytes(data)
+
+
+def ws_frame(opcode, data):
+    n = len(data)
+    head = bytes([0x80 | opcode]) + (bytes([n]) if n < 126 else bytes([126]) + struct.pack(">H", n) if n < 65536
+                                     else bytes([127]) + struct.pack(">Q", n))
+    return head + data
+
+
 def login(ip, password):
     now = time.time()
     if _too_many(("console", ip), now):
         return None, "Too many wrong passwords. Try again in 5 minutes."
-    if not CONSOLE_PASSWORD:
-        return None, "No console password is set on the server (CONSOLE_PASSWORD in ~/Desktop/docker/dashboard/.env)."
-    if not hmac.compare_digest(password.encode(), CONSOLE_PASSWORD.encode()):
+    if not (CONSOLE_PASSWORD_HASH or CONSOLE_PASSWORD):
+        return None, "No console password is set. On the server run: bash ~/Desktop/docker/dashboard/set-password.sh console"
+    ok = (check_password(CONSOLE_PASSWORD_HASH, password, "CONSOLE_PASSWORD_HASH") if CONSOLE_PASSWORD_HASH
+          else hmac.compare_digest(password.encode(), CONSOLE_PASSWORD.encode()))
+    if not ok:
         _failed(("console", ip), now)
         return None, "Wrong password."
     tok = secrets.token_urlsafe(32)
@@ -1306,7 +1408,10 @@ def event_detail(eid):
 
 STATIC = {"/favicon.svg": ("favicon.svg", "image/svg+xml"), "/favicon.ico": ("favicon.ico", "image/x-icon"),
           "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png"), "/icon-192.png": ("icon-192.png", "image/png"),
-          "/icon-512.png": ("icon-512.png", "image/png"), "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json")}
+          "/icon-512.png": ("icon-512.png", "image/png"), "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
+          # xterm.js for the Terminal page, kept in the image (vendor/README) so the page loads no outside code
+          "/vendor/xterm.js": ("vendor/xterm.js", "text/javascript"), "/vendor/xterm.css": ("vendor/xterm.css", "text/css"),
+          "/vendor/addon-fit.js": ("vendor/addon-fit.js", "text/javascript")}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1331,6 +1436,100 @@ class Handler(BaseHTTPRequestHandler):
 
     def locked(self):
         return self.send(401, {"error": "The dashboard is locked.", "locked": True})
+
+    def terminal_ws(self):
+        tok = self.cookie("dashsess")
+        if not term_authed(tok):
+            return self.send(401, {"error": "Unlock the terminal first."})
+        # a page on another site can open a WebSocket here too (SameSite=Strict already keeps the cookie off
+        # it, but check anyway): the Origin has to be this dashboard
+        origin = urllib.parse.urlparse(self.headers.get("Origin") or "")
+        if origin.netloc != (self.headers.get("Host") or "") or origin.scheme != "http":
+            return self.send(403, {"error": "Wrong origin."})
+        key = self.headers.get("Sec-WebSocket-Key")
+        if (self.headers.get("Upgrade") or "").lower() != "websocket" or not key:
+            return self.send(400, {"error": "WebSocket only."})
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        cols = int(q.get("cols", ["80"])[0]) if q.get("cols", [""])[0].isdigit() else 80
+        rows = int(q.get("rows", ["24"])[0]) if q.get("rows", [""])[0].isdigit() else 24
+        try:
+            br = term_bridge({"op": "attach", "cols": cols, "rows": rows})
+            first = read_line(br)
+        except OSError:
+            return self.send(503, {"error": "The terminal bridge isn't running on the server. Run: bash ~/Desktop/docker/dashboard/console-bridge/install.sh"})
+        if first != b"ok\n":
+            br.close()
+            try:
+                err = json.loads(first).get("error")
+            except ValueError:
+                err = None
+            return self.send(503, {"error": err or "The terminal bridge refused."})
+        accept = base64.b64encode(hashlib.sha1((key + WS_GUID).encode()).digest()).decode()
+        self.wfile.write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                          f"Sec-WebSocket-Accept: {accept}\r\n\r\n").encode())
+        self.wfile.flush()
+        self.close_connection = True
+        ip = self.client_address[0]
+        log(f"terminal: opened from {ip}")
+        wlock, done = threading.Lock(), threading.Event()
+
+        def to_browser(opcode, data):
+            with wlock:
+                self.wfile.write(ws_frame(opcode, data))
+                self.wfile.flush()
+
+        def pump_out():   # bridge -> browser; also closes the terminal when the dashboard or terminal locks
+            br.settimeout(None)
+            try:
+                while not done.is_set():
+                    r, _, _ = select.select([br], [], [], 5)
+                    if not term_authed(tok):
+                        to_browser(8, struct.pack(">H", 4001) + b"locked")
+                        break
+                    if r:
+                        out = br.recv(65536)
+                        if not out:
+                            to_browser(8, struct.pack(">H", 4000) + b"session ended")
+                            break
+                        to_browser(2, out)
+            except OSError:
+                pass
+            finally:
+                done.set()
+                try:
+                    self.connection.shutdown(socket.SHUT_RDWR)   # unblocks the reader below
+                except OSError:
+                    pass
+
+        t = threading.Thread(target=pump_out, daemon=True)
+        t.start()
+        try:
+            while not done.is_set():
+                fr = ws_read_frame(self.rfile)
+                if fr is None or fr[0] == 8:
+                    break
+                op, data = fr
+                if op == 9:
+                    to_browser(10, data)
+                elif op == 2 or (op == 0 and data):
+                    br.sendall(b"d" + struct.pack(">I", len(data)) + data)
+                elif op == 1:
+                    try:
+                        c, r = json.loads(data)["resize"]
+                        br.sendall(b"r" + struct.pack(">IHH", 4, max(10, min(int(c), 500)), max(4, min(int(r), 200))))
+                    except (ValueError, KeyError, TypeError):
+                        pass
+        except OSError:
+            pass
+        finally:
+            done.set()
+            try:
+                br.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            t.join(6)
+            br.close()
+            log(f"terminal: closed from {ip}")
 
     def send(self, code, body, ctype="application/json", headers=None):
         data = body if isinstance(body, bytes) else (json.dumps(body, ensure_ascii=False) if ctype == "application/json" else body).encode()
@@ -1370,6 +1569,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, activity_page())
             if p == "/api/weather":
                 return self.send(200, forecast())
+            if p == "/api/terminal":
+                return self.send(200, terminal_status(self.cookie("dashsess")))
+            if p == "/api/terminal/ws":
+                return self.terminal_ws()
             if p == "/api/minecraft":
                 return self.send(200, minecraft_detail(self.authed()))
             if p == "/api/console/log":
@@ -1413,10 +1616,19 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/auth/logout":
             with _auth_lock:
                 _dash_sessions.pop(self.cookie("dashsess"), None)
+                _term_unlocked.discard(self.cookie("dashsess"))
             return self.send(200, {"ok": True}, headers={"Set-Cookie": dash_cookie.format("", 0)})
         if not self.dash_ok(touch=(p == "/api/auth/active")):
             return self.locked()
         if p == "/api/auth/active":
+            return self.send(200, {"ok": True})
+        if p == "/api/terminal/login":
+            err = term_login(ip, self.cookie("dashsess"), str(body.get("password", "")))
+            log(f"terminal: {'unlocked' if not err else 'failed unlock: ' + err} from {ip}")
+            return self.send(403, {"error": err}) if err else self.send(200, {"ok": True})
+        if p == "/api/terminal/lock":
+            with _auth_lock:
+                _term_unlocked.discard(self.cookie("dashsess"))
             return self.send(200, {"ok": True})
         if p == "/api/console/login":
             tok, err = login(ip, str(body.get("password", "")))

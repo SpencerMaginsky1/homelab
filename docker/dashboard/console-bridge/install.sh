@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
-# Installs the Minecraft console bridge as a systemd user service (no sudo). README 3.14.
+# Installs the dashboard's two host bridges as systemd user services (no sudo). README 3.14.
+#   mc-console-bridge  types commands into the Minecraft console
+#   term-bridge        the Terminal page's shell (tmux session "dashboard")
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$HOME/.config/systemd/user" "$here/../run"
-cp "$here/mc-console-bridge.service" "$HOME/.config/systemd/user/"
+for svc in mc-console-bridge term-bridge; do
+  cp "$here/$svc.service" "$HOME/.config/systemd/user/"
+done
 systemctl --user daemon-reload
-systemctl --user enable --now mc-console-bridge.service
-systemctl --user restart mc-console-bridge.service
-systemctl --user --no-pager status mc-console-bridge.service | head -5
+for svc in mc-console-bridge term-bridge; do
+  systemctl --user enable --now "$svc.service"
+  systemctl --user restart "$svc.service"
+  systemctl --user --no-pager status "$svc.service" | head -5
+done

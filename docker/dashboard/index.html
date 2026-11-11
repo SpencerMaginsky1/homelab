@@ -241,6 +241,7 @@ td.r, th.r { text-align: right; }
 .pill.run { background: var(--accent-soft); color: var(--accent); }
 .pill.warn { background: var(--warn-soft); color: var(--warn); }
 .pill.bad { background: var(--bad-soft); color: var(--bad); }
+.pill.idle { background: var(--sunk); color: var(--muted); }
 .pill .dot { width: 6px; height: 6px; }
 .ram { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
 .ram .bar { width: 64px; height: 5px; }
@@ -379,6 +380,20 @@ a.ev:hover strong { color: var(--accent); }
 }
 .login input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .form-error { color: var(--bad); font-size: 13px; margin: 0; }
+/* terminal page (xterm.js, loaded only on #terminal) */
+.shterm { background: var(--term-bg); border-radius: 8px; padding: 8px 4px 8px 10px; height: max(360px, calc(100vh - 330px)); min-height: 0; }
+.shterm .xterm { height: 100%; }
+.shterm .xterm-viewport { border-radius: 8px; }
+.shterm .xterm-viewport::-webkit-scrollbar { width: 8px; }
+.shterm .xterm-viewport::-webkit-scrollbar-thumb { background: var(--term-dim); border-radius: 4px; }
+.keybar { display: flex; gap: 6px; flex-wrap: wrap; }
+.keybar .chip { font-family: var(--font-data); font-size: 12px; padding: 5px 10px; }
+.shstate { font-size: 12.5px; color: var(--muted); }
+.shstate.bad { color: var(--bad); }
+.term-home { display: flex; flex-direction: column; gap: 6px; }
+@media (max-width: 700px) {
+  .shterm { height: calc(100vh - 330px); height: calc(100dvh - 330px); min-height: 260px; padding: 6px 2px 6px 6px; }
+}
 /* lock screen: nothing else on the page renders (or loads) until the server accepts the password */
 body.locked > :not(#lock) { display: none !important; }
 #lock { display: none; }
@@ -509,7 +524,7 @@ a.rainrow:hover strong { color: var(--accent); }
   .home-grid > .stack { display: contents; }
   .home-grid > .stack > .panel { grid-column: 1 / -1; }
   #lights-panel { order: 0; } #servers-panel { order: 1; } #uptime-panel { order: 2; }
-  #containers-panel { order: 3; } #mc-panel { order: 4; } #activity-panel { order: 5; }
+  #containers-panel { order: 3; } #mc-panel { order: 4; } #term-panel { order: 4; } #activity-panel { order: 5; }
 }
 @media (max-width: 600px) {
   .machines { grid-template-columns: minmax(0, 1fr); }
@@ -665,6 +680,11 @@ a.rainrow:hover strong { color: var(--accent); }
           <div class="panel-head"><h2>Minecraft</h2><span class="meta" id="mc-state"></span></div>
           <div class="mc" id="mc"></div>
           <div class="panel-head"><span></span><a class="meta go" href="#minecraft">Console and details →</a></div>
+        </section>
+        <section class="panel" id="term-panel">
+          <div class="panel-head"><h2>Terminal</h2><span class="meta" id="term-state"></span></div>
+          <div class="term-home" id="term-home"><p class="note">A shell on Spencer-Server, starting in <code>~/Desktop/Claude</code>.</p></div>
+          <div class="panel-head"><span></span><a class="meta go" href="#terminal">Open terminal →</a></div>
         </section>
         <section class="panel" id="activity-panel">
           <div class="panel-head"><h2>Activity</h2><a class="meta go" href="#activity">See all →</a></div>
@@ -1370,7 +1390,7 @@ function renderConsole(d) {
   if (!box) return;
   stopConsole();
   if (!d.console_ready) {
-    box.innerHTML = `<div class="panel-head"><h3>Console</h3></div><p class="empty">No console password is set. Add <code>CONSOLE_PASSWORD=…</code> to <code>~/Desktop/docker/dashboard/.env</code>, then run <code>docker compose up -d</code> in that folder.</p>`;
+    box.innerHTML = `<div class="panel-head"><h3>Console</h3></div><p class="empty">No console password is set. On the server run <code>bash ~/Desktop/docker/dashboard/set-password.sh console</code>.</p>`;
     return;
   }
   if (!d.authed) {
@@ -1680,7 +1700,7 @@ function drawCharts() {
 async function loadDetail(quiet) {
   const cur = current;
   if (!cur) return;
-  const path = ["activity", "minecraft", "weather"].includes(cur.type) ? `/api/${cur.type}` : cur.type === "weatherday" ? "/api/weather"
+  const path = ["activity", "minecraft", "weather", "terminal"].includes(cur.type) ? `/api/${cur.type}` : cur.type === "weatherday" ? "/api/weather"
     : `/api/${cur.type}/${cur.key}?range=${range}`;
   if (!quiet) { $("view-detail").innerHTML = `${crumb}<p class="loading">Loading…</p>`; detailSig = ""; }
   try {
@@ -1697,6 +1717,7 @@ async function loadDetail(quiet) {
     else if (cur.type === "event") renderEvent(data);
     else if (cur.type === "weather") renderWeather(data);
     else if (cur.type === "weatherday") renderWeatherDay(data, cur.key);
+    else if (cur.type === "terminal") renderTerminal(data);
     else renderActivity(data);
     if (open.length) document.querySelectorAll("#view-detail .ev details").forEach((d) => { if (open.includes(d.closest(".ev").textContent.slice(0, 80))) d.open = true; });
     drawCharts();
@@ -1718,16 +1739,18 @@ async function refreshSummary() {
   } catch {
     $("offline").hidden = false;
   }
+  api("/api/terminal").then(renderTermPanel).catch(() => {});
 }
 
 function route() {
   const h = location.hash.slice(1);
   const m = h.match(/^(server|monitor|container|event)-([a-z0-9-]+)$/);
   const wd = h.match(/^weather-day-([0-4])$/);
-  current = ["activity", "minecraft", "weather"].includes(h) ? { type: h } : wd ? { type: "weatherday", key: +wd[1] }
+  current = ["activity", "minecraft", "weather", "terminal"].includes(h) ? { type: h } : wd ? { type: "weatherday", key: +wd[1] }
     : m ? { type: m[1], key: m[2] } : null;
   detail = null;
   stopConsole();
+  stopShell();
   closeSheet();
   const tab = !current ? "home" : current.type === "server" ? "server" : current.type === "minecraft" ? "minecraft"
     : current.type === "weather" || current.type === "weatherday" ? "weather"
@@ -1786,7 +1809,149 @@ document.addEventListener("click", (e) => {
 window.addEventListener("hashchange", () => { if (lock.started) route(); });
 let rt;
 window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(drawCharts, 120); });
-document.addEventListener("visibilitychange", () => { if (!document.hidden && lock.started) { refreshSummary(); if (current) loadDetail(true); } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && lock.started) { refreshSummary(); if (current && current.type !== "terminal") loadDetail(true); } });
+
+/* ---------- terminal ----------
+   #terminal: a shell as spencer in the tmux session "dashboard", through term-bridge on the host.
+   Needs the terminal password on top of the dashboard lock; the server closes the stream (code 4001)
+   as soon as either locks. Closing the page only detaches; the session keeps running. */
+const shell = { t: null, fit: null, ws: null, ro: null, opened: false, xterm: null };
+const SH_KEYS = [["Esc", "\x1b"], ["Tab", "\t"], ["Ctrl+C", "\x03"], ["Ctrl+D", "\x04"], ["Ctrl+L", "\x0c"],
+  ["↑", "\x1b[A"], ["↓", "\x1b[B"], ["←", "\x1b[D"], ["→", "\x1b[C"]];
+
+function renderTermPanel(d) {
+  if (!$("term-state")) return;
+  const pill = !d.bridge ? `<span class="pill bad"><span class="dot"></span>bridge off</span>`
+    : d.session ? `<span class="pill ok"><span class="dot"></span>session running</span>`
+    : `<span class="pill idle"><span class="dot"></span>no session</span>`;
+  $("term-state").innerHTML = pill;
+  $("term-home").innerHTML = `<p class="note">A shell on Spencer-Server as spencer, starting in <code>~/Desktop/Claude</code>.
+    ${d.session ? "Your last session is still open; it picks up where you left off." : "Opening it starts a new tmux session."}
+    ${d.unlocked ? "" : "Needs the terminal password."}</p>`;
+}
+
+function loadXterm() {
+  if (shell.xterm) return shell.xterm;
+  const add = (tag, attrs) => new Promise((ok, fail) => {
+    const el = Object.assign(document.createElement(tag), attrs);
+    el.onload = ok; el.onerror = () => fail(new Error(`Couldn't load ${attrs.src || attrs.href}`));
+    document.head.appendChild(el);
+  });
+  shell.xterm = Promise.all([add("link", { rel: "stylesheet", href: "/vendor/xterm.css" }),
+    add("script", { src: "/vendor/xterm.js" }).then(() => add("script", { src: "/vendor/addon-fit.js" }))])
+    .catch((e) => { shell.xterm = null; throw e; });
+  return shell.xterm;
+}
+
+function stopShell() {
+  if (shell.ws) { shell.ws.onclose = null; shell.ws.close(); shell.ws = null; }
+  if (shell.ro) { shell.ro.disconnect(); shell.ro = null; }
+  if (shell.t) { shell.t.dispose(); shell.t = null; }
+}
+
+function renderTerminal(d) {
+  stopShell();
+  const status = !d.bridge ? `<span class="health bad"><span class="dot"></span>bridge not running</span>`
+    : d.session ? `<span class="health ok"><span class="dot"></span>session running</span>` : `<span class="health idle"><span class="dot"></span>no session yet</span>`;
+  let body;
+  if (!d.bridge) body = `<p class="empty">The terminal bridge isn't running on the server. Run this once (no sudo):</p>
+      <div class="cmdbox"><code>bash ~/Desktop/docker/dashboard/console-bridge/install.sh</code></div>`;
+  else if (!d.configured) body = `<p class="empty">No terminal password is set yet. On the server run:</p>
+      <div class="cmdbox"><code>bash ~/Desktop/docker/dashboard/set-password.sh terminal</code></div>`;
+  else if (!d.unlocked) body = `<div class="panel-head"><h3>Unlock the terminal</h3></div>
+      <form class="login" id="sh-login" autocomplete="on">
+        <input type="text" name="username" value="terminal" autocomplete="username" hidden>
+        <input type="password" id="sh-pass" name="password" placeholder="Terminal password" autocomplete="current-password" aria-label="Terminal password" required>
+        <button class="btn primary" type="submit">Unlock</button>
+      </form>
+      <p class="form-error" id="sh-login-err" hidden></p>
+      <p class="note">This is a full shell on the server as spencer (sudo still asks for your Linux password). It stays unlocked until the dashboard locks.</p>`;
+  else body = `<div class="shterm" id="sh-term"></div>
+      <div class="keybar" aria-label="Extra keys">${SH_KEYS.map(([k], i) => `<button class="chip" type="button" data-shkey="${i}">${esc(k)}</button>`).join("")}</div>
+      <div class="toolbar"><span class="shstate" id="sh-state">Connecting…</span><span class="grow"></span>
+        <button class="btn" type="button" id="sh-reconnect" hidden>Reconnect</button>
+        <button class="btn" type="button" id="sh-lock">Lock terminal</button></div>`;
+  $("view-detail").innerHTML = `${crumb}
+    <div class="dhead"><div><h2>Terminal ${status}</h2>
+      <div class="specs"><span>Spencer-Server</span><span>tmux session “dashboard”</span><span>starts in ~/Desktop/Claude</span></div></div>
+      <div class="dtools"><span class="note">Same session over SSH: <code>tmux attach -t dashboard</code></span></div></div>
+    <section class="panel">${body}</section>`;
+  if (d.unlocked && d.bridge && d.configured) openShell();
+  else if ($("sh-pass")) $("sh-pass").focus();
+}
+
+function shState(text, bad, reconnect) {
+  const el = $("sh-state");
+  if (!el) return;
+  el.textContent = text; el.classList.toggle("bad", !!bad);
+  $("sh-reconnect").hidden = !reconnect;
+}
+
+async function openShell() {
+  try { await loadXterm(); }
+  catch (e) { shState(e.message, true, false); return; }
+  const el = $("sh-term");
+  if (!el || shell.t) return;
+  const css = getComputedStyle(document.documentElement), v = (k) => css.getPropertyValue(k).trim();
+  try { await document.fonts.load('13px "JetBrains Mono"'); } catch {}
+  if (!$("sh-term") || shell.t) return;   // navigated away while loading
+  const t = new Terminal({
+    cursorBlink: true, scrollback: 5000, fontFamily: v("--font-data"), fontSize: matchMedia("(max-width: 700px)").matches ? 12 : 13.5,
+    theme: { background: v("--term-bg"), foreground: v("--term-fg"), cursor: v("--term-fg"), selectionBackground: "#3b4b5e",
+             red: v("--term-bad"), green: v("--term-ok"), yellow: v("--term-warn"), blue: v("--term-accent") },
+  });
+  const fit = new FitAddon.FitAddon();
+  t.loadAddon(fit);
+  t.open(el);
+  fit.fit();
+  Object.assign(shell, { t, fit });
+  const enc = new TextEncoder();
+  const sendBytes = (bytes) => { if (shell.ws && shell.ws.readyState === 1) shell.ws.send(bytes); };
+  t.onData((s) => sendBytes(enc.encode(s)));
+  t.onBinary((s) => sendBytes(Uint8Array.from(s, (c) => c.charCodeAt(0) & 255)));
+  t.onResize(({ cols, rows }) => { if (shell.ws && shell.ws.readyState === 1) shell.ws.send(JSON.stringify({ resize: [cols, rows] })); });
+  shell.ro = new ResizeObserver(() => { try { fit.fit(); } catch {} });
+  shell.ro.observe(el);
+  connectShell();
+}
+
+function connectShell() {
+  const t = shell.t;
+  if (!t) return;
+  shell.opened = false;
+  shState("Connecting…", false, false);
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/terminal/ws?cols=${t.cols}&rows=${t.rows}`);
+  ws.binaryType = "arraybuffer";
+  shell.ws = ws;
+  ws.onopen = () => { shell.opened = true; shState("Connected · closing this page leaves the session running", false, false); t.focus(); };
+  ws.onmessage = (e) => { if (e.data instanceof ArrayBuffer) t.write(new Uint8Array(e.data)); };
+  ws.onclose = (e) => {
+    if (shell.ws !== ws) return;
+    shell.ws = null;
+    if (e.code === 4001) { loadDetail(false); return; }   // terminal or dashboard locked: show the password form again
+    if (e.code === 4000) { shState("The session ended (exit). Reconnect starts a new one.", false, true); return; }
+    if (!shell.opened) { loadDetail(false); return; }      // refused before it opened: re-check why (lock, bridge)
+    shState("Disconnected.", true, true);
+  };
+}
+
+document.addEventListener("submit", async (e) => {
+  if (e.target.id !== "sh-login") return;
+  e.preventDefault();
+  const err = $("sh-login-err");
+  try {
+    await postJSON("/api/terminal/login", { password: $("sh-pass").value });
+    loadDetail(false);
+  } catch (ex) {
+    err.textContent = ex.message; err.hidden = false; $("sh-pass").select();
+  }
+});
+document.addEventListener("click", (e) => {
+  const k = e.target.closest("[data-shkey]");
+  if (k && shell.ws && shell.ws.readyState === 1) { shell.ws.send(new TextEncoder().encode(SH_KEYS[+k.dataset.shkey][1])); shell.t.focus(); return; }
+  if (e.target.id === "sh-reconnect") { connectShell(); return; }
+  if (e.target.id === "sh-lock") { postJSON("/api/terminal/lock", {}).catch(() => {}).finally(() => loadDetail(false)); return; }
+});
 
 /* ---------- lock screen ----------
    The server holds the real lock: every /api/ call needs an unlocked session, and a session dies after
@@ -1825,7 +1990,7 @@ function startDashboard() {
   route();
   refreshSummary();
   setInterval(() => { if (!document.hidden) refreshSummary(); }, 15_000);
-  setInterval(() => { if (!document.hidden && current && current.type !== "activity") loadDetail(true); }, 30_000);
+  setInterval(() => { if (!document.hidden && current && current.type !== "activity" && current.type !== "terminal") loadDetail(true); }, 30_000);
   setInterval(() => { if (Date.now() - lock.lastInput > lock.idleMs) lockNow(true); }, 5_000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - lock.lastInput > lock.idleMs) lockNow(true); });
 }

@@ -6,6 +6,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY app.py index.html favicon.svg favicon.ico apple-touch-icon.png icon-192.png icon-512.png manifest.webmanifest ./
+COPY vendor/xterm.js vendor/xterm.css vendor/addon-fit.js ./vendor/
 USER 65534:65534
 EXPOSE 7576
 CMD ["python3", "-u", "app.py"]
