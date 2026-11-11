@@ -19,6 +19,11 @@ Serves:
   POST /api/console/login | logout | command   (command goes to the console bridge on the host)
   POST /api/lights          {"id": "<plug id>" | "all", "on": true|false}   switch a light (state is in /api/summary)
   /ping                    200 while the web server is up (Docker healthcheck)
+Lock screen: every /api/ route except /api/auth/* needs the dashboard password (DASHBOARD_PASSWORD_HASH in
+.env, set with set-password.sh). A session ends after LOCK_IDLE_MINUTES with no keyboard/mouse/touch activity;
+the page reports activity with POST /api/auth/active, and its own background refreshes don't count.
+  GET  /api/auth/status     {"authed", "configured", "idle_minutes"}
+  POST /api/auth/login {"password"} | logout | active
 """
 import hashlib
 import hmac
@@ -52,6 +57,8 @@ WEATHER_NAME = os.environ.get("WEATHER_NAME", "New York")
 MC_DIR = os.environ.get("MC_DIR", "/data/minecraft")
 MC_SOCK = os.environ.get("MC_SOCK", "/run/mc-console/mc-console.sock")
 CONSOLE_PASSWORD = os.environ.get("CONSOLE_PASSWORD", "")
+DASHBOARD_PASSWORD_HASH = os.environ.get("DASHBOARD_PASSWORD_HASH", "").strip()   # scrypt:n:r:p:salt:hash (hex)
+LOCK_IDLE_MINUTES = max(1, int(os.environ.get("LOCK_IDLE_MINUTES", "10")))
 KASA_HOSTS = [h.strip() for h in os.environ.get("KASA_HOSTS", "").split(",") if h.strip()]
 KASA_USERNAME = os.environ.get("KASA_USERNAME", "")
 KASA_PASSWORD = os.environ.get("KASA_PASSWORD", "")
@@ -1129,20 +1136,71 @@ def console_send(cmd):
 
 
 _sessions, _fails, _auth_lock = {}, {}, threading.Lock()
+_dash_sessions = {}   # token -> time of the last real user activity
+
+
+def _too_many(key, now):
+    with _auth_lock:
+        _fails[key] = [t for t in _fails.get(key, []) if now - t < 300]
+        return len(_fails[key]) >= 5
+
+
+def _failed(key, now):
+    time.sleep(1)
+    with _auth_lock:
+        _fails.setdefault(key, []).append(now)
+
+
+def check_dashboard_password(password):
+    try:
+        _, n, r, p, salt, want = DASHBOARD_PASSWORD_HASH.split(":")
+        got = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=int(n), r=int(r), p=int(p),
+                             maxmem=128 * 1024 * 1024, dklen=len(want) // 2)
+        return hmac.compare_digest(got, bytes.fromhex(want))
+    except ValueError:
+        log("lock: DASHBOARD_PASSWORD_HASH is malformed; run set-password.sh again")
+        return False
+
+
+def dash_login(ip, password):
+    now = time.time()
+    if _too_many(("dash", ip), now):
+        return None, "Too many wrong passwords. Try again in 5 minutes."
+    if not DASHBOARD_PASSWORD_HASH:
+        return None, "No dashboard password is set yet. On the server run: bash ~/Desktop/docker/dashboard/set-password.sh"
+    if not check_dashboard_password(password):
+        _failed(("dash", ip), now)
+        return None, "Wrong password."
+    tok = secrets.token_urlsafe(32)
+    with _auth_lock:
+        for k in [k for k, t in _dash_sessions.items() if now - t > LOCK_IDLE_MINUTES * 60]:
+            del _dash_sessions[k]
+        _dash_sessions[tok] = now
+    return tok, None
+
+
+def dash_authed(tok, touch=False):
+    now = time.time()
+    with _auth_lock:
+        last = _dash_sessions.get(tok)
+        if last is None:
+            return False
+        if now - last > LOCK_IDLE_MINUTES * 60:
+            del _dash_sessions[tok]
+            return False
+        if touch:
+            _dash_sessions[tok] = now
+        return True
 
 
 def login(ip, password):
     now = time.time()
-    with _auth_lock:
-        _fails[ip] = [t for t in _fails.get(ip, []) if now - t < 300]
-        if len(_fails[ip]) >= 5:
-            return None, "Too many wrong passwords. Try again in 5 minutes."
+    if _too_many(("console", ip), now):
+        return None, "Too many wrong passwords. Try again in 5 minutes."
     if not CONSOLE_PASSWORD:
         return None, "No console password is set on the server (CONSOLE_PASSWORD in ~/Desktop/docker/dashboard/.env)."
     if not hmac.compare_digest(password.encode(), CONSOLE_PASSWORD.encode()):
-        time.sleep(1)
-        with _auth_lock:
-            _fails[ip].append(now)
+        _failed(("console", ip), now)
         return None, "Wrong password."
     tok = secrets.token_urlsafe(32)
     with _auth_lock:
@@ -1268,6 +1326,12 @@ class Handler(BaseHTTPRequestHandler):
             exp = _sessions.get(tok)
         return bool(exp and exp > time.time())
 
+    def dash_ok(self, touch=False):
+        return dash_authed(self.cookie("dashsess"), touch)
+
+    def locked(self):
+        return self.send(401, {"error": "The dashboard is locked.", "locked": True})
+
     def send(self, code, body, ctype="application/json", headers=None):
         data = body if isinstance(body, bytes) else (json.dumps(body, ensure_ascii=False) if ctype == "application/json" else body).encode()
         self.send_response(code)
@@ -1295,6 +1359,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, f.read(), ctype)
             if p == "/ping":
                 return self.send(200, "ok", "text/plain")
+            if p == "/api/auth/status":
+                return self.send(200, {"authed": self.dash_ok(), "configured": bool(DASHBOARD_PASSWORD_HASH),
+                                       "idle_minutes": LOCK_IDLE_MINUTES})
+            if p.startswith("/api/") and not self.dash_ok():
+                return self.locked()
             if p == "/api/summary":
                 return self.send(200, summary())
             if p == "/api/activity":
@@ -1333,6 +1402,22 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             body = {}
         ip = self.client_address[0]
+        dash_cookie = "dashsess={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}"
+        if p == "/api/auth/login":
+            tok, err = dash_login(ip, str(body.get("password", "")))
+            if err:
+                log(f"lock: failed unlock from {ip}: {err}")
+                return self.send(403, {"error": err})
+            log(f"lock: dashboard unlocked from {ip}")
+            return self.send(200, {"ok": True}, headers={"Set-Cookie": dash_cookie.format(tok, 30 * 86400)})
+        if p == "/api/auth/logout":
+            with _auth_lock:
+                _dash_sessions.pop(self.cookie("dashsess"), None)
+            return self.send(200, {"ok": True}, headers={"Set-Cookie": dash_cookie.format("", 0)})
+        if not self.dash_ok(touch=(p == "/api/auth/active")):
+            return self.locked()
+        if p == "/api/auth/active":
+            return self.send(200, {"ok": True})
         if p == "/api/console/login":
             tok, err = login(ip, str(body.get("password", "")))
             if err:

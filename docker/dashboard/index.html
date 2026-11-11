@@ -379,6 +379,30 @@ a.ev:hover strong { color: var(--accent); }
 }
 .login input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .form-error { color: var(--bad); font-size: 13px; margin: 0; }
+/* lock screen: nothing else on the page renders (or loads) until the server accepts the password */
+body.locked > :not(#lock) { display: none !important; }
+#lock { display: none; }
+body.locked #lock {
+  display: grid; place-items: center; min-height: 100vh; min-height: 100dvh; padding: 16px;
+}
+.lockbox {
+  width: 100%; max-width: 360px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 28px 24px; display: flex; flex-direction: column; gap: 14px; text-align: center;
+}
+.lockbox svg { width: 34px; height: 34px; margin: 0 auto; fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.lockbox h1 { margin: 0; font-size: 20px; }
+.lockbox .time { font-size: 34px; font-weight: 500; margin: -4px 0 0; }
+.lockbox form { display: flex; flex-direction: column; gap: 10px; }
+.lockbox input {
+  font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--sunk); color: var(--fg); width: 100%;
+}
+.lockbox input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lockbox .btn { padding: 10px 14px; font-size: 14px; }
+.lockbox .note code { overflow-wrap: anywhere; }
+.lockbtn { font: inherit; font-size: 12.5px; font-weight: 600; color: var(--muted); background: none; border: 1px solid var(--line);
+  border-radius: 999px; padding: 3px 10px; cursor: pointer; align-self: center; }
+.lockbtn:hover { color: var(--accent); border-color: var(--accent); }
 .confirm { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .confirm span { flex: 1 1 260px; }
 /* activity event page */
@@ -566,7 +590,21 @@ a.rainrow:hover strong { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
-<body>
+<body class="locked">
+<div id="lock">
+  <div class="lockbox">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>
+    <h1>Spencer-Server</h1>
+    <p class="time num" id="lock-time"></p>
+    <form id="lock-form" autocomplete="on">
+      <input type="text" name="username" value="dashboard" autocomplete="username" hidden>
+      <input type="password" id="lock-pw" name="password" placeholder="Password" autocomplete="current-password" aria-label="Dashboard password" required>
+      <button class="btn primary" type="submit" id="lock-go">Unlock</button>
+    </form>
+    <p class="form-error" id="lock-err" role="alert" hidden></p>
+    <p class="note" id="lock-note">Locks again after a few minutes with no activity.</p>
+  </div>
+</div>
 <div class="wrap">
   <div class="banner bad" id="offline" hidden>Can't reach the dashboard backend. Retrying every 15 seconds.</div>
 
@@ -580,6 +618,7 @@ a.rainrow:hover strong { color: var(--accent); }
       <span id="wx"></span>
       <span class="time num" id="time"></span>
       <span id="date"></span>
+      <button class="lockbtn" id="lock-now" type="button" title="Lock the dashboard">Lock</button>
     </div>
   </header>
 
@@ -684,6 +723,7 @@ let actFilter = "all";
 async function api(path) {
   const r = await fetch(path, { cache: "no-store" });
   const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && j.locked) lockNow(false);
   if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
   return j;
 }
@@ -1272,6 +1312,7 @@ try { term.history = JSON.parse(localStorage.getItem("mc-history") || "[]"); } c
 async function postJSON(path, body) {
   const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && j.locked) lockNow(false);
   if (!r.ok) throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { status: r.status });
   return j;
 }
@@ -1742,17 +1783,99 @@ document.addEventListener("click", (e) => {
   }
   if (e.target.id === "mc-lock") { postJSON("/api/console/logout", {}).finally(() => loadDetail(false)); }
 });
-window.addEventListener("hashchange", route);
+window.addEventListener("hashchange", () => { if (lock.started) route(); });
 let rt;
 window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(drawCharts, 120); });
-document.addEventListener("visibilitychange", () => { if (!document.hidden) { refreshSummary(); if (current) loadDetail(true); } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && lock.started) { refreshSummary(); if (current) loadDetail(true); } });
 
-tickClock();
-setInterval(tickClock, 10_000);
-route();
-refreshSummary();
-setInterval(() => { if (!document.hidden) refreshSummary(); }, 15_000);
-setInterval(() => { if (!document.hidden && current && current.type !== "activity") loadDetail(true); }, 30_000);
+/* ---------- lock screen ----------
+   The server holds the real lock: every /api/ call needs an unlocked session, and a session dies after
+   idle_minutes without a POST /api/auth/active. This page sends that only when someone actually moved the
+   mouse, typed, scrolled or touched, so the 15/30-second refreshes never keep it unlocked by themselves. */
+const lock = { idleMs: 10 * 60_000, lastInput: Date.now(), lastBeat: 0, started: false, going: false };
+
+function lockNow(tellServer) {
+  if (lock.going || !lock.started) return;
+  lock.going = true;
+  // reload so no data from the unlocked session stays in the page (or in memory)
+  const reload = () => location.reload();
+  if (tellServer) postJSON("/api/auth/logout", {}).catch(() => {}).finally(reload);
+  else reload();
+}
+
+function noteInput() {
+  if (!lock.started) return;
+  const now = Date.now();
+  if (now - lock.lastInput > lock.idleMs) return lockNow(true);   // came back after the timeout (sleep, hidden tab)
+  lock.lastInput = now;
+  if (now - lock.lastBeat > 60_000) {
+    lock.lastBeat = now;
+    postJSON("/api/auth/active", {}).catch(() => {});
+  }
+}
+["pointerdown", "pointermove", "keydown", "wheel", "touchstart", "scroll"].forEach((t) =>
+  window.addEventListener(t, noteInput, { passive: true, capture: true }));
+
+function startDashboard() {
+  lock.started = true;
+  lock.lastInput = lock.lastBeat = Date.now();
+  document.body.classList.remove("locked");
+  tickClock();
+  setInterval(tickClock, 10_000);
+  route();
+  refreshSummary();
+  setInterval(() => { if (!document.hidden) refreshSummary(); }, 15_000);
+  setInterval(() => { if (!document.hidden && current && current.type !== "activity") loadDetail(true); }, 30_000);
+  setInterval(() => { if (Date.now() - lock.lastInput > lock.idleMs) lockNow(true); }, 5_000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - lock.lastInput > lock.idleMs) lockNow(true); });
+}
+
+function lockClock() {
+  $("lock-time").textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+async function bootLock() {
+  let st;
+  try { st = await (await fetch("/api/auth/status", { cache: "no-store" })).json(); }
+  catch { st = null; }
+  if (st && st.authed) {
+    lock.idleMs = st.idle_minutes * 60_000;
+    return startDashboard();
+  }
+  lockClock();
+  setInterval(lockClock, 10_000);
+  if (st) $("lock-note").textContent = `Locks again after ${st.idle_minutes} minutes with no activity.`;
+  if (st && !st.configured) {
+    $("lock-form").hidden = true;
+    $("lock-note").innerHTML = "No password is set yet. On the server run:<br><code>bash ~/Desktop/docker/dashboard/set-password.sh</code>";
+    return;
+  }
+  if (!st) { $("lock-err").textContent = "Can't reach the dashboard backend. Reload to try again."; $("lock-err").hidden = false; }
+  $("lock-pw").focus();
+}
+
+$("lock-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const pw = $("lock-pw"), btn = $("lock-go"), err = $("lock-err");
+  btn.disabled = true; err.hidden = true;
+  try {
+    const r = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pw.value }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    pw.value = "";
+    const st = await (await fetch("/api/auth/status", { cache: "no-store" })).json();
+    lock.idleMs = st.idle_minutes * 60_000;
+    startDashboard();
+  } catch (ex) {
+    err.textContent = ex.message; err.hidden = false;
+    pw.select();
+  } finally {
+    btn.disabled = false;
+  }
+});
+$("lock-now").addEventListener("click", () => lockNow(true));
+
+bootLock();
 </script>
 </body>
 </html>
