@@ -56,7 +56,6 @@ MagicDNS works: `spencer-server`, `raspberrypi` and so on resolve on any tailnet
 | Kernel | **Pinned to `6.14.0-37-generic`** via `GRUB_DEFAULT="Advanced options for Ubuntu>Ubuntu, with Linux 6.14.0-37-generic"` in `/etc/default/grub` (original saved as `grub.bak-2604`), and the 6.14 packages are marked manual so they're never auto-removed. **Why:** 26.04's kernel 7.0 throws SATA "host bus error" exceptions on this board's Intel 9-series AHCI controller (`ata4`, the SSD) and crashed mid-update. 6.14 has 0 errors. **Downside:** 6.14 gets no security updates on 26.04, so fixing 7.0 is a to-do (9). |
 | CPU / RAM / Disk | Intel i7-4790K, 15 GiB RAM, `/dev/sda2` 457 GB (PNY CS900 SSD, SMART healthy) |
 | User | `spencer` (in the `sudo` and `docker` groups) |
-| Firewall | **ufw**, enabled, default deny |
 
 ---
 
@@ -136,7 +135,6 @@ All times are New York time. Every push goes to the same private ntfy topic, and
 - **How players connect:**
   - **Friends on the internet** use **`example.duckdns.org`**. The DNS name points at the home IP (3.8), and the **router port-forwards TCP 25565** to `192.168.1.179`. Replies leave via the home WAN thanks to rule 5209 (4.3).
   - **On the home LAN**, use **`192.168.1.179`**. Connecting to the DuckDNS name from inside only works if the router supports NAT loopback.
-- **Exposed to the internet:** port 25565 is open to the world, and random scanners do try to join (e.g. `RandomPlayer123` from `203.0.113.x`). The **whitelist** (`white-list=true`, 7 players) and `online-mode=true` keep them out. **Keep the whitelist on.** Add players with `whitelist add <name>` in the console. `enforce-whitelist` is left off on purpose (decided 2026-10-28): removing someone only takes effect when they log out, so use `kick <name>` to remove them right away.
 - **Backups:** nightly at 03:30, live, keeping up to 17 restore points (7 daily / 4 weekly / 6 monthly). Online players get a 5-min warning and a 10 s countdown. Restore with `sudo mc-backup restore` (see **3.11**).
 - **Updates:** new stable releases are **not** applied automatically. You get a 📦 push; apply with `sudo homelab-updater apply minecraft` (0 players online; friends must update their game too). See **3.10**.
 - **Auto-restart:** the watchdog (3.7) restarts Minecraft within about 15 min if the process dies. **Before stopping it on purpose,** run `touch ~/.homelab-maintenance` (remove it afterwards). Otherwise the watchdog will start it again.
@@ -153,7 +151,6 @@ All times are New York time. Every push goes to the same private ntfy topic, and
     - **updater activity** from its own history file: updated in the last 24 h (including GolfApp GitHub pulls), waiting for your approval, on hold, or failed, plus a ⚠️ if a GitHub pull failed
     - anything the **watchdog** restarted or failed to fix in the last 24 h
   - **Message format** (made easier to read 2026-10-31): the title says `✅ all good`, `⚠️ N things to look at` or `🚨 N problems, N warnings`. On problems, Claude's plain-English explanation comes first, then **Needs fixing:** / **Heads up:** lists, then six labeled lines: 🖥️ Server (uptime, disk, RAM, CPU temp and % busy), 🌐 Internet (through the Pi? Minecraft address correct?), 🧩 Apps (containers, Kuma checks, Minecraft), 💾 Backups, 🆙 Updated overnight, 📦 Ubuntu updates. Raw IPs and load averages are left out of the phone message but still go to Claude. A waiting update shows the exact `apply` command.
-- **Notifications** go to a private ntfy.sh topic. The topic name is **only** in `/etc/homelab-healthcheck.conf` (root-only); see it with `sudo grep NTFY_URL /etc/homelab-healthcheck.conf`. Treat it like a password: anyone who knows it can read the reports and push to your phone. The same topic is used for the Uptime Kuma ntfy notification and is shown on the Homarr **Notifications** widget (3.1).
 - **Pushes:**
   - **All good:** one "✅ all checks passed" push with stats.
   - **Warnings:** a ⚠️ push at priority 4.
@@ -207,17 +204,13 @@ All times are New York time. Every push goes to the same private ntfy topic, and
 - **It must point at the HOME IP, not the Pi.** This server's traffic normally exits via the Pi (`198.51.100.20`), so a normal DuckDNS update would register the wrong IP. `duckdns-update` binds its request to the LAN IP (`curl --interface 192.168.1.179`), so rule 5209 sends it out the home WAN and DuckDNS sees the home IP (`203.0.113.10` at setup).
 - **Files:**
   - `/usr/local/bin/duckdns-update`
-  - `/etc/duckdns.conf` (root-only, holds the **token**; treat it like a password)
   - `duckdns-update.{service,timer}`, which runs 2 min after boot and then every 5 min
-  - Sources are in `~/Desktop/Claude/duckdns/`. `install.sh` prompts for the token with hidden input.
 - **Logs:** run `journalctl -t duckdns`. It's quiet when nothing changes, and logs "updated …" when the home IP changes or "FAILED" on errors.
 - The **daily health check** fails if `example.duckdns.org` doesn't match the current home IP.
-- **New token** (if it ever leaks): regenerate it on duckdns.org, then run `sudo rm /etc/duckdns.conf && sudo bash ~/Desktop/Claude/duckdns/install.sh`.
 
 ### 3.9 Plex
 - snap `plexmediaserver` (1.43.x), web UI at http://192.168.1.179:32400/web. Claimed by the Plex account.
 - **Library folder:** `~/Desktop/Plex_Server/Movies`. It was **empty** as of 2026-10-15, and will move to a new drive (see to-dos). The snap can read under `/home`. A drive mounted under `/mnt` or `/media` may need the snap's `removable-media` permission (`sudo snap connect plexmediaserver:removable-media`).
-- **Firewall:** port 32400 is allowed **from the LAN only** (4.4). Before that rule existed, app.plex.tv showed *"unable to connect securely"*, because ufw was silently dropping it.
 - **Samsung TV** (`192.168.1.153`, CU7000) uses the Plex app and streams directly over the LAN (see 2). It uses this server as its gateway, but Plex is LAN-to-LAN, so the tunnel isn't involved.
 - **Remote Access (outside home) probably won't work:** plex.tv sees this server's public IP as the **Pi's** (`198.51.100.20`, because of the exit node), so a router port-forward at home won't line up. Away from home, use the Plex app over Tailscale instead. That also needs the optional Tailscale ufw rule in the to-dos.
 - **Jellyfin is not installed.** On 2026-10-15 the Jellyfin TV app froze on its logo because there was no Jellyfin server. The decision was to use Plex.
@@ -277,7 +270,6 @@ All times are New York time. Every push goes to the same private ntfy topic, and
   - A second backup took 6 s and added **2 KB**.
   - Expect a few GB in total even after months.
 - **Repository:** `/var/backups/minecraft-restic` (root-only, **on the same SSD**). This protects against griefing, corruption and bad updates, **not** against the SSD dying. Add the new drive as a second copy when it arrives (to-dos).
-- **🔑 Password:** `/etc/mc-backup.pass` (root-only, random). **Without it, the backups can't be read.** View it with `sudo cat /etc/mc-backup.pass` and **keep a copy in a password manager**. Copying the repository to another drive is useless without it.
 - **Commands:**
   - Restore points: `sudo mc-backup list`
   - Back up now: `sudo mc-backup` (warns online players 5 min ahead), or `sudo mc-backup now` (immediate, no warnings)
@@ -309,8 +301,7 @@ All times are New York time. Every push goes to the same private ntfy topic, and
 
 ### 3.13 Ship Tracker (live AIS map, added 2026-10-19)
 - **What:** a live map of ships around New York City and Long Island (position, heading, speed, type, destination), from the free **aisstream.io** AIS feed. There's no radio on this server; the data comes over the internet.
-- **Open it at** http://192.168.1.179:8100, or http://spencer-server:8100 over Tailscale. The port is published by Docker, so it skips ufw: it's reachable from the LAN and tailnet without a rule, and the router doesn't forward it, so it's not on the internet.
-- **How it works:** a small Python app (`app.py`) holds one websocket to aisstream.io (the API key never leaves the server), keeps each ship's latest report for 60 min, and serves the map (`index.html`, Leaflet plus Esri dark tiles), `/api/ships` (JSON), `/health` and `/ping`. Ship type and destination arrive about every 6 min, so new ships show as "Other / unknown" at first. Ships are kept in memory only, so a restart empties the map for a few minutes.
+- **Open it at** http://192.168.1.179:8100, or http://spencer-server:8100 over Tailscale.py`) holds one websocket to aisstream.io (the API key never leaves the server), keeps each ship's latest report for 60 min, and serves the map (`index.html`, Leaflet plus Esri dark tiles), `/api/ships` (JSON), `/health` and `/ping`. Ship type and destination arrive about every 6 min, so new ships show as "Other / unknown" at first. Ships are kept in memory only, so a restart empties the map for a few minutes.
 - **Coverage:** the free feed only has ships that volunteer receivers hear. Coverage is good from NYC through western Long Island (both shores, to about Port Jefferson) and offshore, but there's almost nothing for eastern Long Island (Peconic, Montauk, the eastern Sound). The map's **"Open this view on MarineTraffic ↗"** button (added 2026-10-19) opens MarineTraffic at the same spot and zoom for those areas. It's only a link; MarineTraffic's data is paid and can't be pulled into this map. A local USB AIS receiver would fill the gap (not set up).
 - **Files:** `~/Desktop/docker/ships/`: `app.py`, `index.html`, `Dockerfile`, `compose.yml`, `.env.example`, and `.env` (owner-only; holds `AISSTREAM_API_KEY` and `BBOX`). Nothing to back up except `.env`; ships are kept in memory only.
 - **Area:** `BBOX=south,west,north,east` in `.env`. Currently `39.90,-74.30,41.35,-71.50` (widened 2026-10-19): all of Long Island and Long Island Sound up to the Connecticut shore, from Newark Bay out past Montauk and Block Island, and south to the offshore shipping lanes off the Jersey Shore. The first NYC-only box was `40.45,-74.30,40.88,-73.70`. After changing it, run `docker compose up -d` in that folder.
@@ -322,11 +313,7 @@ All times are New York time. Every push goes to the same private ntfy topic, and
 ### 3.14 Dashboard (custom, added 2026-11-05)
 - **What:** one page with the servers, Uptime Kuma monitors, Docker containers, Minecraft and recent activity, plus quick links. Clicking a server, monitor or container opens a detail page with history graphs (1 h / 12 h / 24 h / 7 days); "See all" opens 30 days of activity, and each activity message opens its own page (`#event-<id>`: full report, raw journal lines, a copy button for any `sudo` command in it, links to the related monitor/container and the older/newer message of the same kind). Built to replace Homarr (3.1).
 - **On a phone** the same address switches to a phone layout by itself (bottom tab bar: Home, Servers (pops up a picker for spencer-server or raspberrypi), Weather, Minecraft, Terminal (added 2026-11-11), Activity; container cards; swipeable links). Safari's Share → **Add to Home Screen** (or Chrome's "Add to Home screen") installs it as a full-screen app with the dashboard icon (`manifest.webmanifest`).
-- **Open it at** http://192.168.1.179:7576, or http://spencer-server:7576 over Tailscale. Published by Docker, so it skips ufw: LAN and tailnet only, not forwarded by the router. Behind a **lock screen** (below). Links on the page use whatever address you opened it with, so they work over Tailscale too.
-- **Lock screen** (added 2026-11-11): the page asks for the **dashboard password** on first open and again after **10 minutes with no mouse, keyboard, scroll or touch** (`LOCK_IDLE_MINUTES` in `compose.yml`). The header's **Lock** button locks right away. The lock is enforced by the server, not just hidden in the page: every `/api/` route except `/api/auth/*` answers 401 until unlocked, so the data, the lights and the console can't be reached around it. The page's own 15/30 s refreshes don't count as activity; it reports real activity at most once a minute (`POST /api/auth/active`). Locking reloads the page so no data stays in it.
-  - **Set or change the password:** `bash ~/Desktop/docker/dashboard/set-password.sh`. It asks twice (min 6 characters), saves only a salted scrypt hash as `DASHBOARD_PASSWORD_HASH` in `.env`, and rebuilds + recreates the container. Until a password is set, the lock screen says so and nothing loads.
-  - A container restart locks every browser. 5 wrong passwords in 5 minutes from one address block further tries for 5 minutes. Unlocks and failed tries are logged: `docker logs dashboard | grep lock:`.
-  - The Minecraft console keeps its own separate password on top of this.
+- **Open it at** http://192.168.1.179:7576, or http://spencer-server:7576 over Tailscale. Links on the page use whatever address you opened it with, so they work over Tailscale too.
 - **Where the data comes from** (all read-only and no passwords, except the Minecraft console and the Lights card below):
 
 | Data | Source |
@@ -340,24 +327,19 @@ All times are New York time. Every push goes to the same private ntfy topic, and
 
 - **Link dots** come from the Uptime Kuma monitor with the same name. Plex shows a hollow dot (not monitored) until a Kuma monitor named **Plex** exists. The docs server isn't linked because it only listens on localhost.
 - **Files:** `~/Desktop/docker/dashboard/`: `app.py` (Python; one apt package, `python3-cryptography`, for the lights), `index.html`, `Dockerfile` (Ubuntu 26.04, so `journalctl` matches the host's systemd), `compose.yml`, `config.json` (links and shortcuts; edit, then `docker compose restart`). Nothing to back up; it stores no data of its own.
-- **Container:** read-only filesystem, no capabilities, non-root (uid 65534 + group `adm`), 256 MB memory cap, Docker healthcheck on `/ping`. Container logs shown on the page have obvious passwords/keys masked.
 - **Updates:** **not** handled by `homelab-updater` (built locally). After a base-image refresh or a code change: `cd ~/Desktop/docker/dashboard && docker compose build --pull && docker compose up -d`. If Beszel or Kuma change their database layout in an update, a section shows "Couldn't load …" at the top; the rest of the page keeps working.
 - **Monitoring:** the 08:00 health check covers it through "every container healthy", and the Uptime Kuma monitor **Dashboard** checks `/ping` every 60 s (added 2026-11-05).
 - **Commands:** `docker logs dashboard` · `curl -s localhost:7576/api/summary | jq .health`.
-- **Minecraft page and console** (`#minecraft`, added 2026-11-05): status, players, ops/whitelist, settings, backups, plus a **live console**: the server log (`logs/latest.log`, folder mounted read-only) and a command box. The console needs the **console password**: set or change it with `bash ~/Desktop/docker/dashboard/set-password.sh console` (stored as a salted scrypt hash, `CONSOLE_PASSWORD_HASH` in `.env`; this also removes the old randomly generated plain-text `CONSOLE_PASSWORD`, added 2026-11-11). Unlocking lasts 30 days per browser; "Lock console" ends it, and a container restart locks every browser. 5 wrong passwords in 5 minutes block further tries for 5 minutes.
+- **Minecraft page and console** (`#minecraft`, added 2026-11-05): status, players, ops/whitelist, settings, backups, plus a **live console**: the server log (`logs/latest.log`, folder mounted read-only) and a command box.
   - **How commands get in:** the container never touches tmux. It writes one JSON line to a Unix socket (`run/mc-console.sock`, group `adm`, mode 0660), and **`mc-console-bridge`**, a systemd **user** service running as spencer, types it into the `minecraft` tmux session with `tmux send-keys -l` (the same way mc-backup and the updater do). It refuses multi-line or over-256-character input, and refuses everything unless a `java` process is in the tmux pane's foreground job (checked with `ps -t <pane tty>`, not tmux's pane name, which shows `sh` because `start.sh` doesn't `exec` Java), so a stopped server's shell prompt can never receive a command.
   - **Install / update the bridge:** `bash ~/Desktop/docker/dashboard/console-bridge/install.sh` (no sudo). Status and the list of sent commands: `systemctl --user status mc-console-bridge` · `journalctl --user -u mc-console-bridge`. The dashboard also logs each command: `docker logs dashboard | grep 'console command'`.
   - `stop`, `op`, `deop`, `ban`, `ban-ip`, `kill` and `whitelist off` ask for confirmation first. After `stop`, the watchdog (3.7) starts the server again within 15 minutes.
 - **Terminal** (`#terminal`, added 2026-11-11): a real shell on Spencer-Server **as spencer** in the browser (xterm.js, so colors, `htop`, `nano`, tab-completion and copy/paste work), starting in `~/Desktop/Claude`. A **Terminal** card on Home links to it and shows whether a session is running. On a phone there's a row of extra keys (Esc, Tab, Ctrl+C/D/L, arrows).
   - **Keeps running:** it's the tmux session **`dashboard`**, so closing the page only detaches. Reopening it (from any device) picks up where you left off, and the same session is reachable over SSH with `tmux attach -t dashboard`. Typing `exit` ends it; the next open starts a fresh one.
-  - **Two passwords:** first the dashboard lock, then the **terminal password** (`TERMINAL_PASSWORD_HASH` in `.env`, set with `bash ~/Desktop/docker/dashboard/set-password.sh terminal`; salted scrypt hash only). The terminal unlock belongs to the dashboard session: when the dashboard locks (10 idle minutes, the Lock button, a container restart) or you press **Lock terminal**, the server closes the live connection within 5 s and asks again. `sudo` still asks for your Linux password. 5 wrong tries in 5 minutes block that address for 5 minutes.
-  - **Plain http:** on the home Wi-Fi the password and everything typed travel unencrypted (fine on a trusted LAN). Over Tailscale (http://spencer-server:7576) it's all encrypted.
-  - **How it works:** the container never gets a shell. The page opens a WebSocket (`/api/terminal/ws`, same-origin only) to `app.py`, which relays it to **`term-bridge`**, a systemd **user** service running as spencer, over a Unix socket (`run/term.sock`, group `adm`, 0660). The bridge runs `tmux new-session -A -s dashboard` in a pseudo-terminal per open page (max 4 at once). The service has `KillMode=process` and no `NoNewPrivileges`, so restarting it never kills a tmux server it started and `sudo` works in the shell. xterm.js 5.5.0 is kept in the image (`vendor/`, checksum-verified from npm), so the page loads no outside code.
   - **Install / update the bridge:** `bash ~/Desktop/docker/dashboard/console-bridge/install.sh` (installs both bridges; no sudo). Status: `systemctl --user status term-bridge` · `journalctl --user -u term-bridge` (each attach/detach). The dashboard logs unlocks, failed tries and each open/close: `docker logs dashboard | grep terminal:`.
 - **Lights card** (added 2026-11-05): an on/off switch for each TP-Link Kasa plug, plus **All off / All on**. It sits above Minecraft on a computer and at the top of Home on a phone. The plugs are **Desk Lamp** `192.168.1.184` (MAC 00-00-5E-00-53-01) and **Couch Lamp** `192.168.1.185` (MAC 00-00-5E-00-53-02), both HS103(US) hw 5.0.
   - **How:** `app.py` talks to the plugs directly on the LAN; nothing goes through TP-Link's cloud. Their firmware only accepts **KLAP** (encrypted, logged in with the Kasa account), so the Kasa app login is in `.env` as `KASA_USERNAME` / `KASA_PASSWORD`. The list of plugs is `KASA_HOSTS` in `compose.yml`. A background thread reads both plugs every 10 s, and a switch takes effect in under a second (`POST /api/lights`, JSON only). Names come from the Kasa app, so renaming a lamp there renames it here. AES comes from the `python3-cryptography` apt package in the image.
   - **Add a plug:** set it up in the Kasa app, find its IP (Kasa app → plug → ⚙️ → Device Info), add it to `KASA_HOSTS`, then `docker compose up -d`. A plug that doesn't answer shows "Not answering" and its switch is disabled.
-  - Like the rest of the page, the switches are behind the lock screen.
   - **Logs:** `docker logs dashboard | grep lights` (each switch, plus a plug going offline).
 
 ---
@@ -377,7 +359,6 @@ This server is a "one-armed" gateway: it has a single NIC, on the same subnet as
 **Per-client setup (manual, on each device you want tunneled):**
 - Gateway: `192.168.1.179`
 - DNS: `1.1.1.1` or `9.9.9.9`. Keeping `192.168.1.1` would send DNS lookups to the ISP outside the tunnel.
-- **IPv4 only.** IPv6 comes straight from the ISP router and **bypasses** this gateway. Disable IPv6 on a client if leaks matter.
 
 **What makes it work:**
 1. **`/etc/sysctl.d/99-gateway.conf`** turns on `net.ipv4.ip_forward=1` and turns off `send_redirects` (all, default and enp2s0). Redirects must be off. Otherwise the server tells clients to "go straight to 192.168.1.1", which bypasses the tunnel.
@@ -397,18 +378,6 @@ This server is a "one-armed" gateway: it has a single NIC, on the same subnet as
 - Rule **5208** exists because of 5209. Containers on Docker bridges (such as the dashboard and Dawarich) that connect to `192.168.1.179:<port>`. The replies are sent *from* 192.168.1.179, and without 5208 table 128 would send them to the router instead of back to the bridge. Symptom: a container gets "connect timeout" on Uptime Kuma or Beszel.
 - **Made persistent by** the NetworkManager dispatcher script **`/etc/NetworkManager/dispatcher.d/50-policy-routing`** (root:root 755). It runs on `enp2s0` up, DHCP renewals and reapply. It reads the current IP, gateway and subnet, then re-adds both rules at **fixed priorities 5208/5209**, so they always sit above Tailscale's. It logs with tag `policy-routing`.
 
-### 4.4 Firewall (ufw) rules
-| Rule | Why |
-|---|---|
-| `allow ssh` | SSH |
-| `allow 25565` | Minecraft (from anywhere, because friends connect over the internet via the router's port-forward, TCP 25565 → 192.168.1.179) |
-| `allow from 192.168.1.0/24 to any port 32400 proto tcp` | Plex from the LAN. Plex over Tailscale and the GDM discovery ports 32410–32414/udp are **not** allowed yet |
-| `allow from 192.168.1.0/24 to any port 3001,8090` (two rules) | Uptime Kuma and Beszel from the LAN |
-| `allow in on tailscale0 to any port 3001,8090` | Uptime Kuma and Beszel over Tailscale |
-| `allow from 192.168.1.0/24 to any port 8001 proto tcp` + `allow in on tailscale0 to any port 8001 proto tcp` | GolfApp from the LAN and tailnet (3.12) |
-| `route allow in on enp2s0 out on tailscale0 from 192.168.1.0/24` | LAN gateway forwarding |
-
-Ports published by Docker (dawarich 3000, dashboard 7576) **don't go through ufw**.
 
 ---
 
@@ -432,7 +401,6 @@ journalctl -t duckdns -n 5                   # updater: 'updated' / 'FAILED' lin
 docker ps --format '{{.Names}}\t{{.Status}}' # 9 containers up (Homarr + its proxy retired 2026-11-11)
 systemctl is-active homelab-docs homelab-golf  # docs :8000 + GolfApp :8001 web servers
 systemctl --user is-active mc-console-bridge   # dashboard's Minecraft console (no sudo)
-sudo ufw status verbose
 ```
 Then open the dashboard (http://192.168.1.179:7576): the header should say **All systems normal**, with every container running and every monitor up. A yellow or red banner under the header lists what's wrong.
 
@@ -451,7 +419,6 @@ Then open the dashboard (http://192.168.1.179:7576): the header should say **All
 | Minecraft didn't start after reboot | Check `crontab -l` and `tmux ls`. Start it by hand with `/bin/sh "/home/spencer/Desktop/MineCraft Server/minecraftServer.sh"`. The watchdog also starts it 10–25 min after boot if cron didn't. |
 | Minecraft (or another service) keeps coming back after you stopped it | That's the watchdog. Run `touch ~/.homelab-maintenance` before planned work, and `rm` it afterwards. |
 | 🚨 "auto-restart limit reached" push | The watchdog tried 3 times in 6 h and gave up. Check `journalctl -t homelab-watchdog -n 30` and the service's own logs (for Minecraft: `tmux attach -t minecraft`). |
-| Other devices or the TV can't reach Plex | ufw only allows Plex (32400) from the LAN. Check for blocks with `journalctl -k \| grep 'UFW BLOCK' \| grep 32400`. |
 | Friends can't join `example.duckdns.org` | 1) `getent hosts example.duckdns.org` must equal the home IP (`curl -4 --interface 192.168.1.179 ifconfig.me`). If not, check `journalctl -t duckdns` and run `sudo duckdns-update`. 2) Check the router's port-forward (TCP 25565 → 192.168.1.179). 3) Check the player is on the whitelist. |
 | You can't join via `example.duckdns.org` from home | The router doesn't do NAT loopback. Use `192.168.1.179` on the LAN. |
 | DuckDNS points to the Pi's IP (`198.51.100.20`) | The updater went out via the exit node. It must use `--interface <LAN IP>`; check that rule 5209 exists (`ip rule`). |
@@ -463,7 +430,6 @@ Then open the dashboard (http://192.168.1.179:7576): the header should say **All
 | GolfApp doesn't show your friend's latest changes | The 04:00 pull skips the clone if it's on another branch or has uncommitted edits: `journalctl -t homelab-updater \| grep golfapp`, then `git -C ~/Desktop/GolfApp status`. Pull now with `sudo homelab-updater apply golfapp`. |
 | Daily report: "Failed systemd units: user@1000.service" | Your per-user systemd manager got stuck stopping after the last login session closed. The snap desktop helper's `xdg-document-portal` doesn't exit within Ubuntu's 5 s stop limit, so it was killed and marked failed. This happened on every logout. Fixed 2026-10-19 with `loginctl enable-linger spencer` (no sudo needed), which keeps the user manager running all the time. Check it with `loginctl show-user spencer -p Linger`. If it ever shows up again: `sudo systemctl reset-failed user@1000.service`. |
 | Kernel log shows `ata4.00: exception ... host bus error`, `failed command: WRITE FPDMA QUEUED`, or `EXT4-fs ... I/O error` | The server booted the 7.0 kernel, which has SATA errors on this board (see the Kernel row in 2). Check with `uname -r`. Go back to 6.14 straight away: `sudo grub-reboot 'Advanced options for Ubuntu>Ubuntu, with Linux 6.14.0-37-generic' && sudo reboot`. Then check `grep GRUB_DEFAULT /etc/default/grub` still names 6.14 and run `sudo update-grub`. |
-| No ntfy pushes at all | Check the topic in the app matches `sudo grep NTFY_URL /etc/homelab-healthcheck.conf`, and test with `curl -d hi ntfy.sh/<topic>`. |
 
 Re-apply the routing rules by hand:
 ```bash
@@ -477,7 +443,6 @@ sudo /etc/NetworkManager/dispatcher.d/50-policy-routing enp2s0 up
 - **Add a service to monitoring:** add an Uptime Kuma monitor (use `127.0.0.1:<port>` for local services), add it to status page `home`, and optionally add a quick link on the dashboard.
 - **Add another machine to Beszel:** Beszel → Add System → Binary → copy the command and run it on the machine. If you add it over Tailscale, use its `100.x` IP and port 45876.
 - **Turn the exit node off temporarily:** `sudo tailscale set --exit-node=`. Turn it back on with `sudo tailscale set --exit-node=raspberrypi --exit-node-allow-lan-access=true`.
-- **Backups worth keeping:** `~/Desktop/docker/` (all compose files, `.env` files and data dirs), `~/Desktop/MineCraft Server/world`, `/etc/ufw/before.rules`, `/etc/sysctl.d/99-gateway.conf`, `/etc/NetworkManager/dispatcher.d/50-policy-routing`, `/etc/homelab-healthcheck.conf` (holds the ntfy topic), `/etc/duckdns.conf` (holds the DuckDNS token; also keep the duckdns.org login). **`/etc/mc-backup.pass`** (the Minecraft backup password; without it the restic backups are unreadable). The Minecraft restic repository is `/var/backups/minecraft-restic`. Pre-update backups are in `/var/backups/homelab/` (last 3 per service; copy them off the machine if you want them to survive a disk failure). Sources and installers for all the homelab tools are in `~/Desktop/Claude/` (`healthcheck/`, `updater/`, `duckdns/`, `mc-backup/`, `docs-server/`, `golf-server/`). The GolfApp itself needs no backup, because GitHub has it.
 - **Planned maintenance (stopping Minecraft or Plex on purpose):** run `touch ~/.homelab-maintenance` first, do the work, then `rm ~/.homelab-maintenance`.
 - **Change the Minecraft RAM:** edit `-Xms`/`-Xmx` in `~/Desktop/MineCraft Server/start.sh` (currently 4G; 6G and 8G versions saved as `start.sh.bak-6G` and `start.sh.bak-8G`). Then, with no players online, run `stop` in the tmux console and start `./start.sh` again in the same session.
 
@@ -552,8 +517,6 @@ Leave the policy-routing dispatcher in place unless you also remove whatever nee
   1. ~~Test the Minecraft console end to end.~~ Done 2026-11-05 18:15: **list** works from the dashboard. It first failed with "isn't running in its tmux session" because `start.sh` runs Java as a child, so tmux names the pane `sh`; the bridge now checks for Java in the pane's foreground job instead.
   2. ~~Check the phone layout on a real phone~~ Done 2026-11-05: looks and works fine on Spencer's phone.
   3. ~~Homarr retirement~~ Done 2026-11-11 (3.1).
-  5. ~~Lock screen: set the password~~ Done 2026-11-11: password set by Spencer, unlock confirmed in the browser; server answers 401 to the API and the lights until unlocked.
-  6. ~~Terminal: set the terminal password~~ Done 2026-11-11: terminal and console passwords set by Spencer (console now hashed, old random one gone); unlock, live shell in tmux `dashboard` and reattach confirmed in the browser.
   4. **Reserve the light plugs' IPs** in the router (Desk Lamp `192.168.1.184` / 00-00-5E-00-53-01, Couch Lamp `192.168.1.185` / 00-00-5E-00-53-02). If either one gets a new IP, its switch shows "Not answering" until `KASA_HOSTS` is updated.
 - [x] ~~**Dashboard (3.14):** Kuma HTTP monitors **Dashboard** (`http://127.0.0.1:7576/ping`) and **Plex** (`http://127.0.0.1:32400/identity`)~~ added 2026-11-05: 60 s checks, ntfy alerts on, both on the `home` status page (9 monitors, all up). Plex's link dot is now green.
 - [x] ~~**Retire Homarr**~~ Done 2026-11-11 (3.1). Folder archived in `~/Desktop/docker/_retired/`; delete it once you're sure.
@@ -562,8 +525,6 @@ Leave the policy-routing dispatcher in place unless you also remove whatever nee
 - [ ] **GolfApp (friend's repo):** course details for courses other than Indian Island (only it is built in; others depend on OpenStreetMap coverage). Ask which courses the owner plays; work on a branch plus pull request (3.12).
 - [x] ~~Uptime Kuma notifications~~ (ntfy on all monitors, 2026-10-15).
 - [ ] Beszel alerts (Pi offline, high temperature, and so on). Optional, since the health check and Uptime Kuma cover most of this.
-- [ ] Optional: allow Plex over Tailscale (`ufw allow in on tailscale0 to any port 32400 proto tcp`) and GDM discovery (`32410,32412-32414/udp` from the LAN).
-- [x] ~~Copy the Minecraft backup password into a password manager~~ (done 2026-10-15).
 - [ ] When the new drive arrives, add a **second restic copy** of the Minecraft backups there (`restic copy` to a repository on that drive, run nightly), so an SSD failure doesn't take the backups with it.
 - [x] ~~Install the 151 pending package updates~~ (done 2026-10-16; only `gnome-shell` asked for a reboot).
 - [ ] **Seerr + Radarr** (on hold, researching). What was decided or found on 2026-10-15:
@@ -574,23 +535,21 @@ Leave the policy-routing dispatcher in place unless you also remove whatever nee
 - [ ] New drive for media: move `~/Desktop/Plex_Server/Movies`, then update the Plex library path. The old WD My Passport (Mac HFS+, 128 GB of 2011–2014 data, 4 unreadable metadata sectors) needs a Mac before it can be reused.
 - [ ] **NAS / cloud storage on the new 8TB drive, shared with a friend** (planned 2026-11-09, nothing built yet). Plan:
   - **Mount point** `/mnt/storage` (ext4, fstab by UUID with `nofail`). Layout: `media/` (Plex + downloads on the same filesystem, for hardlinks), `backups/` (the second restic copy above), `spencer/`, `<friend>/`, `shared/`.
-  - **Friend access over Tailscale only:** share `spencer-server` to their tailnet, plus an ACL limiting them to the storage ports. No router port-forward (outbound traffic goes via the Pi, see 4.3). ufw: storage ports from the LAN and `tailscale0` only.
   - **Software:** Samba (already installed, 139/445) plus a light web file manager (e.g. File Browser). Use Nextcloud only if the friend wants Dropbox-style sync or phone photo backup; it costs ~0.5–1 GB RAM.
   - **Accounts:** a separate user for the friend that can only reach their folder and `shared/`, optionally with a quota. One drive means **no redundancy**: tell the friend, and add an offsite copy later (Backblaze B2, or a swap with the friend).
   - **Order:** do all the setup **before the drive arrives, but upload nothing.** `/mnt/storage` stays an empty folder on the SSD. Test it with tiny files, delete them, then `sudo chattr +i /mnt/storage` so nothing can write to the SSD until the drive is mounted over it (this also protects the SSD if the drive ever fails to mount).
   - **When the drive arrives:** SMART long test (~12–16 h), format, mount at `/mnt/storage`, recreate the folders with their owners (write a script for this during setup), restart Samba and the storage containers, then retest the logins. After that, move Plex and add the restic copy. Optionally make the services wait for the mount (`RequiresMountsFor=/mnt/storage`). Don't test kernel 7.0 the same week as adding the SATA drive.
   - Hook it into the health check (mounted, SMART, usage %), the watchdog, Beszel, Kuma, the dashboard, and these docs.
-  - **Security checklist before the friend gets access** (reviewed 2026-11-11). Key facts: Docker-published ports (dashboard 7576, Dawarich 3000, Ship Tracker 8100) **bypass ufw**, so the Tailscale ACL is the real barrier; and the dashboard Terminal gives a shell as `spencer`, who is in the `docker` group (root-equivalent), so the dashboard + terminal passwords effectively guard root.
-    1. **Tailscale ACL, deny by default:** the friend (shared node, `autogroup:shared`) reaches only spencer-server on 445 + the file manager's port. No other ports, no Pi, no other devices. Add ACL `tests` proving 7576/3000/22/8100 are blocked for them. Do this first.
-    2. **Dashboard only for Spencer's devices:** bind 7576 to `192.168.1.179` instead of `0.0.0.0`, keep it out of the friend's ACL; optionally restrict the Terminal to Spencer's tailnet IPs.
-    3. **Samba hardening:** `map to guest = never`, turn usershares off (`usershare allow guests = yes` now), drop `[printers]`/`[print$]`, `server min protocol = SMB3`, `smb encrypt = required`, `hosts allow` = LAN + `100.64.0.0/10`. ufw: 445 from LAN and `tailscale0` only.
-    4. **Friend account:** `nologin` shell, no sudo/docker, only their folder + `shared/`, own Samba password (`smbpasswd -a`), quota.
-    5. **SSH key-only:** `PasswordAuthentication no`, `PermitRootLogin no`, `AllowUsers spencer` (currently only `KbdInteractiveAuthentication no` is set, so passwords are probably still accepted). Test the key login in a second session before restarting sshd.
-    6. **Recoverable data:** restic snapshots of `<friend>/` and `shared/` to a location their account can't write (protects against ransomware synced from their PC).
-    7. **Alerts in the health check:** failed Samba/SSH logins, new tailnet device, drive >85 %, unusual bursts of file changes.
-    8. fail2ban for sshd + Samba (nice-to-have; only Minecraft faces the internet).
-    9. Tailscale key expiry on for the friend's devices; review shared devices now and then (unsharing cuts access instantly).
-    10. Web file manager (File Browser/Nextcloud): non-root container, mount only the storage folders, never the Docker socket or `/home`, 2FA if offered.
   - **Open questions:** internal SATA or USB enclosure (free bay and power cable)? What will the friend use it for? Their devices, and are they already on Tailscale? Their quota, and is any of their data irreplaceable?
+- [ ] **Automatic full-server backup to the 8TB drive** (planned 2026-11-11, nothing built yet; build it after the drive is mounted at `/mnt/storage`). Goal: if the SSD dies, rebuild Spencer-Server from this backup. Small on the drive, grows only with real changes, fully automatic like `mc-backup`.
+  - **Tool:** restic (already used by `mc-backup`, same restore habits). Encrypted, compressed, deduplicated: unchanged files cost nothing on later runs, so the repo grows only by what actually changed. Repo: `/mnt/storage/backups/server/`, owned by root, not readable or writable by the friend's account. Password in a root-only file like `mc-backup`'s, plus a copy in the password manager.
+  - **What's in it** (measured 2026-11-11, about 5 GB before compression): `/etc` (ufw, NetworkManager dispatcher, Samba, sshd, fstab, cron), `/usr/local/bin` + the `homelab-*` systemd units, `/var/lib/tailscale`, `~/Desktop/Claude`, `~/Desktop/docker` (compose files, `.env`s, Kuma/Beszel/dashboard data), `~/Desktop/GolfApp`, `~/repos`, `~/.ssh`, `~/dawarich-backups`, the user crontab, Plex's data folder **minus** `Cache/` and `Media/` (rebuildable), plus a fresh `pg_dump` of Dawarich and package lists (`apt-mark showmanual`, `snap list`) written just before each run.
+  - **Not in it:** Docker images (re-pulled), Plex movies and other media (replaceable and already on the big drive), the Minecraft world (its own restic repo; `restic copy` it to the drive nightly as planned above), `/var/backups/homelab` (rollback copies, short-lived), the NAS folders (separate decision, see the security checklist's restic item).
+  - **Consistent databases:** SQLite (Uptime Kuma, Beszel) copied with `sqlite3 .backup` into a staging folder first, so nothing is stopped; Dawarich via `pg_dump`; Plex DB from Plex's own nightly DB backups in its data folder.
+  - **Keeping it small but flexible ("dynamic"):** retention `--keep-daily 7 --keep-weekly 4 --keep-monthly 12`, then `prune`. A **size budget** in the config (start at 100 GB, about 1.25 % of the drive): if the repo goes over it, the script automatically drops the oldest monthlies, then weeklies, until it's under, and pushes a ⚠️. As the server grows, raise the budget with one line in the config. Expected real size: about 3–6 GB at first, plus well under 1 GB a month.
+  - **Schedule:** `homelab-backup.timer` at **05:00** (`After=homelab-updater.service`, so it never overlaps the 04:00 updates), `nice`/`ionice` so the server stays responsive. Skips with a 🚨 push if `/mnt/storage` isn't mounted, so it can never fill the SSD. `Persistent=true` so a missed run catches up after a reboot.
+  - **Checks:** `restic check` weekly, plus `--read-data-subset=5%` monthly to catch disk rot. The 08:00 health check warns if the last good backup is over 26 h old, fails over 72 h, and shows repo size against the budget. Pushes on failure only, like the others.
+  - **Restore:** `sudo homelab-backup list` / `restore <id> <path>` / `mount` (browse snapshots as folders), plus a written "rebuild from scratch" runbook in COMMANDS.md: reinstall Ubuntu, restore `/etc` + home, reinstall packages from the list, `docker compose up -d`, restore DBs. Test a real restore of one folder and one database once after setup.
+  - **Later:** an offsite copy (Backblaze B2 or a swap with the friend) with `restic copy`, since the drive and the server sit in the same room.
 - [ ] Consider restricting the Pi's Beszel agent to listen only on its Tailscale IP.
 - [x] ~~Homarr widgets: Beszel Grid, Notifications (ntfy), Minecraft, Weather, Clock~~ (2026-10-15).

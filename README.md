@@ -16,7 +16,7 @@ A self-hosted home server on Ubuntu, running Docker services, a Minecraft server
 | **Plex** | Media streaming to the TV and other devices on the LAN |
 | **Web app hosting** | A friend's golf web app served to the LAN and tailnet for testing |
 
-**Networking:** the server is on a Tailscale tailnet with a Raspberry Pi exit node. Policy routing sends the server's own traffic through the Pi while keeping Minecraft and DuckDNS on the home connection. A ufw firewall defaults to deny, and the dashboards are reachable only from the LAN and tailnet. Details are in [SERVER.md §4](SERVER.md).
+**Networking:** the server is on a Tailscale tailnet with a Raspberry Pi exit node. Policy routing sends the server's own traffic through the Pi while keeping Minecraft and DuckDNS on the home connection. Details are in [SERVER.md §4](SERVER.md).
 
 ## Automation I built
 
@@ -34,7 +34,7 @@ All of these are bash scripts with systemd timers, each with its own `install.sh
 
 | Path | Contents |
 |---|---|
-| [`SERVER.md`](SERVER.md) | Full documentation: services, traffic flow, firewall, troubleshooting table, open to-dos |
+| [`SERVER.md`](SERVER.md) | Full documentation: services, traffic flow, troubleshooting table, open to-dos |
 | [`COMMANDS.md`](COMMANDS.md) | Command cheat sheet grouped by task |
 | [`network-diagram.svg`](network-diagram.svg) | Hand-built SVG of the network, services and automation |
 | [`UPGRADE-26.04.md`](UPGRADE-26.04.md) | Step-by-step plan for the Ubuntu 25.04 → 26.04 LTS upgrade |

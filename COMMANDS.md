@@ -107,7 +107,6 @@ sudo mc-backup restore <ID> --yes                   # ...without the confirmatio
 sudo mc-backup check                                # integrity check (also automatic on Sundays)
 sudo mc-backup stats                                # repository size
 journalctl -t mc-backup -n 30                       # recent runs
-sudo cat /etc/mc-backup.pass                        # 🔑 backup password (copy is in your password manager)
 ```
 - **After a restore,** the old world is kept as `~/Desktop/MineCraft Server/world.before-restore-<time>`. Delete it once you're happy:
   ```bash
@@ -162,9 +161,7 @@ sudo /etc/NetworkManager/dispatcher.d/50-policy-routing enp2s0 up   # re-apply t
 journalctl -t policy-routing -b                     # "applied: ..." since boot
 sysctl net.ipv4.ip_forward net.ipv4.conf.enp2s0.send_redirects     # 1 and 0 (gateway mode)
 
-sudo ufw status verbose                             # firewall rules
 sudo iptables -t nat -S POSTROUTING | grep tailscale0               # gateway NAT rule
-journalctl -k | grep 'UFW BLOCK' | tail             # what the firewall dropped
 ```
 
 ## 10. Docker services
@@ -202,7 +199,6 @@ curl -s http://127.0.0.1:32400/identity             # is it answering?
 
 ## 12. Notifications (ntfy)
 ```bash
-sudo grep NTFY_URL /etc/homelab-healthcheck.conf    # your private topic (treat like a password)
 curl -d "test" ntfy.sh/<topic>                      # send a test push to your phone
 curl -s "ntfy.sh/<topic>/json?poll=1&since=12h" | jq -r '.title'   # what's on the topic (last ~12 h)
 ```
@@ -227,7 +223,6 @@ Run after editing the sources in `~/Desktop/Claude`. Every installer is safe to 
 ```bash
 sudo bash ~/Desktop/Claude/healthcheck/install.sh    # health check + watchdog
 sudo bash ~/Desktop/Claude/updater/install.sh        # updater + rollback (also re-runs the health check installer)
-sudo bash ~/Desktop/Claude/duckdns/install.sh        # DuckDNS (asks for the token only if /etc/duckdns.conf is missing)
 sudo bash ~/Desktop/Claude/docs-server/install.sh    # docs web server (port 8000, localhost only)
 sudo bash ~/Desktop/Claude/golf-server/install.sh    # GolfApp web server (port 8001) + updater with the 04:00 GitHub pull
 sudo install -o root -g root -m 755 ~/Desktop/Claude/mc-backup/mc-backup /usr/local/bin/mc-backup   # mc-backup script only
