@@ -109,11 +109,11 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 
 /* launcher */
 .launch {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px;
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px;
 }
 .group { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; min-width: 0; }
-.group-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); font-weight: 600; padding: 0 6px 0 4px; }
+.group-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); font-weight: 600; padding: 0 6px 0 4px; min-width: 92px; box-sizing: border-box; }
 .link {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 7px 11px; border-radius: 8px; font-weight: 500; font-size: 13.5px;
@@ -128,7 +128,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
   width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center;
   background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700; flex: none;
 }
-.shortcuts { border-left: 1px solid var(--line); padding-left: 12px; }
+.shortcuts { border-top: 1px solid var(--line); padding-top: 10px; }
 
 /* panels */
 .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
@@ -515,8 +515,6 @@ a.rainrow:hover strong { color: var(--accent); }
 
 @media (max-width: 1000px) {
   .span-7, .span-5 { grid-column: 1 / -1; }
-  .launch { grid-template-columns: minmax(0, 1fr); }
-  .shortcuts { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 10px; }
   .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .stats.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .charts { grid-template-columns: minmax(0, 1fr); }
