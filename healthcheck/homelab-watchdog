@@ -3,7 +3,7 @@
 # Only fixes what doesn't fix itself:
 #   - Minecraft not running            -> start it in its tmux session (never force-kills a running server)
 #   - docker/tailscaled/plex "failed"   -> reset-failed + start (systemd gave up after its start limit)
-#   - Plex/Homarr/Beszel hung (web UI not answering 2 runs in a row) -> restart
+#   - Plex/Beszel hung (web UI not answering 2 runs in a row) -> restart
 #   - container "unhealthy" 2 runs in a row -> restart (Docker never does this itself)
 # Pushes to ntfy only when something changes (fixed / fix failed / recovered). No Claude usage.
 # Pause: touch /home/spencer/.homelab-maintenance  (ignored once older than 24h)
@@ -135,7 +135,7 @@ fi
 # ---------------- Docker containers ----------------
 if systemctl is-active -q docker; then
   # Hung web UIs on containers without their own healthcheck
-  declare -A WEB=([homarr]=http://127.0.0.1:7575 [beszel]=http://127.0.0.1:8090)
+  declare -A WEB=([beszel]=http://127.0.0.1:8090)
   for c in "${!WEB[@]}"; do
     [[ $(docker inspect -f '{{.State.Running}}' "$c" 2>/dev/null) == true ]] || continue   # stopped on purpose / not present
     if http_ok "${WEB[$c]}"; then healthy "web-$c" "$c"

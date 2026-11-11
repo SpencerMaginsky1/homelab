@@ -8,7 +8,7 @@ A self-hosted home server on Ubuntu, running Docker services, a Minecraft server
 
 | Service | What it does |
 |---|---|
-| **Homarr** | Main dashboard: service tiles, Uptime Kuma status, system stats, notifications |
+| **Dashboard** | Custom single-page dashboard: servers, monitors, containers, Minecraft, activity, weather and lights, built for the phone |
 | **Uptime Kuma** | Up/down monitoring for every service, with phone alerts |
 | **Beszel** | CPU, RAM, temperature, disk and network graphs |
 | **Dawarich** | Self-hosted location history (3 containers: app with built-in job worker, PostGIS, Redis) |
@@ -40,7 +40,7 @@ All of these are bash scripts with systemd timers, each with its own `install.sh
 | [`UPGRADE-26.04.md`](UPGRADE-26.04.md) | Step-by-step plan for the Ubuntu 25.04 → 26.04 LTS upgrade |
 | `healthcheck/` `updater/` `mc-backup/` `duckdns/` | The automation tools above: scripts, systemd units and installers |
 | `docs-server/` `golf-server/` | Small systemd web servers (docs viewer, web app host) |
-| [`docker/`](docker/) | Docker Compose files for Homarr, Uptime Kuma, Beszel and Dawarich (secrets live in `.env` files, which are not in this repo) |
+| [`docker/`](docker/) | Docker Compose files for the dashboard, Uptime Kuma, Beszel and Dawarich (secrets live in `.env` files, which are not in this repo) |
 | [`minecraft/`](minecraft/) | Minecraft start scripts |
 
 ## Tech

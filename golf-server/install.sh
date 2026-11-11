@@ -14,7 +14,6 @@ install -o root -g root -m 644 homelab-golf.service /etc/systemd/system/
 # Firewall: LAN + tailnet only (same as Uptime Kuma/Beszel). The router doesn't forward it, so not the internet.
 ufw allow from 192.168.1.0/24 to any port 8001 proto tcp comment 'golfapp LAN'
 ufw allow in on tailscale0 to any port 8001 proto tcp comment 'golfapp tailnet'
-ufw allow in on br-homarr to any port 8001 proto tcp comment 'homarr -> golfapp'   # Homarr tile status check
 systemctl daemon-reload
 systemctl enable homelab-golf.service
 systemctl restart homelab-golf.service

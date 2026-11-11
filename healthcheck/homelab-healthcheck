@@ -135,7 +135,6 @@ else
 fi
 
 declare -A WEB=(
-  [Homarr]=http://127.0.0.1:7575
   ["Uptime Kuma"]=http://127.0.0.1:3001
   [Beszel]=http://127.0.0.1:8090
   [Dawarich]=http://127.0.0.1:3000/api/v1/health
@@ -249,7 +248,7 @@ else
       "You are summarizing a daily home-server health check for the owner's phone notification.
 Context: Ubuntu server 'Spencer-Server' (LAN 192.168.1.179) routes all traffic through a Tailscale exit node
 (raspberrypi, 100.64.0.20) and acts as a LAN gateway; it runs Minecraft (tmux), Plex (snap) and Docker stacks
-(Homarr, Uptime Kuma, Beszel, Dawarich), plus a friend's golf web app (homelab-golf, port 8001). The health report comes first on stdin, then the server's README.
+(Uptime Kuma, Beszel, Dawarich, plus a custom dashboard on :7576), plus a friend's golf web app (homelab-golf, port 8001). The health report comes first on stdin, then the server's README.
 Base every fix on how the README says this server is set up (e.g. NAT lives in /etc/ufw/before.rules,
 routing rules come from the NetworkManager dispatcher script) - never suggest generic alternatives
 like iptables-persistent. Write at most 5 short lines, plain text, no markdown, in plain English a non-expert can follow:

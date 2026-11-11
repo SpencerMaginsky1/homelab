@@ -3,7 +3,7 @@
 Quick reference for every command used to run and fix this server. *(Section numbers §3–§9 are referenced by the Automation panel in `network-diagram.svg`, so keep them stable or update the diagram too.)* **How it works and why** is in [README.md](SERVER.md); this file is just **what to type**.
 
 - Commands marked **`sudo`** need your password.
-- `<svc>` is one of `homarr`, `uptime-kuma`, `beszel`, `dawarich`, `minecraft` or `plex`. `golfapp` works with `apply` only (it pulls from GitHub).
+- `<svc>` is one of `uptime-kuma`, `beszel`, `dawarich`, `minecraft` or `plex`. `golfapp` works with `apply` only (it pulls from GitHub).
 - All times are New York time.
 
 ---
@@ -15,7 +15,7 @@ The homelab's own tools (everything else here is standard Linux, Docker or Tails
 |---|---|---|---|
 | `homelab-healthcheck` | Checks ~35 things (containers, web UIs, timers, network, disk) and sends a report to your phone. Runs at 08:00 | `sudo homelab-healthcheck --dry-run` | §3 |
 | `homelab-watchdog` | Restarts Minecraft, Plex and containers if they go down. Runs every 15 min | `sudo homelab-watchdog --dry-run` | §4 |
-| `homelab-updater` | Backs up, updates, health-checks and auto-rolls back Homarr, Kuma, Beszel, Dawarich, Minecraft, Plex and GolfApp. Runs at 04:00 | `sudo homelab-updater status` · `apply <svc>` | §5 |
+| `homelab-updater` | Backs up, updates, health-checks and auto-rolls back Kuma, Beszel, Dawarich, Minecraft, Plex and GolfApp. Runs at 04:00 | `sudo homelab-updater status` · `apply <svc>` | §5 |
 | `homelab-rollback` | Undoes the last update of a service and holds it there | `sudo homelab-rollback <svc>` | §5 |
 | `mc-backup` | Minecraft world backups (restic) with player warnings. Runs at 03:30 | `sudo mc-backup list` · `restore latest` | §6 |
 | `duckdns-update` | Points `example.duckdns.org` at the home IP. Runs every 5 min | `sudo duckdns-update` | §8 |
@@ -23,7 +23,7 @@ The homelab's own tools (everything else here is standard Linux, Docker or Tails
 | `~/Desktop/Claude/github/sync-repos.sh` | Copies the docs and configs to the `homelab` (public, sanitized) and `homelab-private` GitHub repos | `… sync-repos.sh` (preview) · `--push "message"` | README (top) |
 | `~/.homelab-maintenance` | Not a command: a flag file. While it exists, the watchdog leaves things alone (auto-expires after 24 h) | `touch` / `rm` it | §2 |
 
-`<svc>` = `homarr`, `uptime-kuma`, `beszel`, `dawarich`, `minecraft`, `plex` (and `golfapp` for `apply`).
+`<svc>` = `uptime-kuma`, `beszel`, `dawarich`, `minecraft`, `plex` (and `golfapp` for `apply`).
 
 ---
 
@@ -89,7 +89,7 @@ journalctl -t homelab-updater                       # full log
 sudo cat /var/lib/homelab-updater/history.log       # what the 8 AM report reads (timestamp|message)
 sudo ls /var/backups/homelab/<svc>/                 # pre-update backups (last 3; Minecraft last 2)
 ```
-- **Auto:** Homarr, Uptime Kuma, Beszel.
+- **Auto:** Uptime Kuma, Beszel.
 - **Dawarich:** patch releases and Redis/PostGIS rebuilds apply automatically (pg_dump first, rolls back if points go missing). Minor/major releases ask (📦).
 - **Ask first (📦 push):** Minecraft, major Dawarich releases. First push when it appears, then a low-priority "Still waiting" reminder each day at 04:00 until applied.
 - **Plex:** snap updates itself. `sudo homelab-rollback plex` = `snap revert` + hold.
@@ -145,7 +145,7 @@ getent hosts example.duckdns.org                   # what the name points to...
 curl -4 -s --interface 192.168.1.179 ifconfig.me; echo   # ...must equal the home IP
 sudo duckdns-update                                 # push the home IP now
 journalctl -t duckdns -n 10                         # only "updated" / "FAILED" lines (quiet otherwise)
-curl -s https://api.mcsrvstat.us/3/example.duckdns.org | jq '{online, version, players: .players.online}'   # what friends/Homarr see
+curl -s https://api.mcsrvstat.us/3/example.duckdns.org | jq '{online, version, players: .players.online}'   # what friends see
 ```
 
 ## 9. Network, exit node & firewall
@@ -173,7 +173,6 @@ Stacks live in `~/Desktop/docker/`.
 | Service | Folder | Web UI |
 |---|---|---|
 | Dashboard | `~/Desktop/docker/dashboard` | http://192.168.1.179:7576 |
-| Homarr | `~/Desktop/docker/homarr` | http://192.168.1.179:7575 |
 | Uptime Kuma | `~/Desktop/docker/uptime-kuma` | http://192.168.1.179:3001 |
 | Beszel | `~/Desktop/docker/beszel` | http://192.168.1.179:8090 |
 | Dawarich | `~/Desktop/docker` (project `docker`) | http://192.168.1.179:3000 |

@@ -82,15 +82,15 @@
   <g>
     <rect x="328" y="428" width="207" height="40" rx="6" class="svc"/>
     <text x="431" y="445" class="t" text-anchor="middle" font-weight="600">Minecraft :25565</text>
-    <text x="431" y="460" class="s" text-anchor="middle">Java · tmux · 6 GB · nightly backup</text>
+    <text x="431" y="460" class="s" text-anchor="middle">Java · tmux · 4 GB · nightly backup</text>
 
     <rect x="545" y="428" width="207" height="40" rx="6" class="svc"/>
     <text x="648" y="445" class="t" text-anchor="middle" font-weight="600">Plex :32400</text>
     <text x="648" y="460" class="s" text-anchor="middle">snap · ufw: LAN only</text>
 
     <rect x="328" y="474" width="207" height="40" rx="6" class="svc"/>
-    <text x="431" y="491" class="t" text-anchor="middle" font-weight="600">Homarr :7575</text>
-    <text x="431" y="506" class="s" text-anchor="middle">old dashboard · bridge br-homarr</text>
+    <text x="431" y="491" class="t" text-anchor="middle" font-weight="600">Dashboard :7576</text>
+    <text x="431" y="506" class="s" text-anchor="middle">main page · LAN + tailnet</text>
 
     <rect x="545" y="474" width="207" height="40" rx="6" class="svc"/>
     <text x="648" y="491" class="t" text-anchor="middle" font-weight="600">Uptime Kuma :3001</text>
@@ -110,7 +110,7 @@
 
     <rect x="545" y="566" width="207" height="40" rx="6" class="svc"/>
     <text x="648" y="583" class="t" text-anchor="middle" font-weight="600">Docker bridges</text>
-    <text x="648" y="598" class="s" text-anchor="middle">172.17 – 172.22 · 6 networks</text>
+    <text x="648" y="598" class="s" text-anchor="middle">172.17–172.22 · 5 networks</text>
 
     <rect x="328" y="612" width="207" height="40" rx="6" class="svc"/>
     <text x="431" y="629" class="t" text-anchor="middle" font-weight="600">Docs :8000</text>
@@ -124,9 +124,6 @@
     <text x="431" y="675" class="t" text-anchor="middle" font-weight="600">Ship Tracker :8100</text>
     <text x="431" y="690" class="s" text-anchor="middle">live NYC + Long Island ships</text>
 
-    <rect x="545" y="658" width="207" height="40" rx="6" class="svc"/>
-    <text x="648" y="675" class="t" text-anchor="middle" font-weight="600">Dashboard :7576</text>
-    <text x="648" y="690" class="s" text-anchor="middle">main page · LAN + tailnet</text>
   </g>
 
   <text x="330" y="716" class="t" font-weight="700">Networking</text>
@@ -177,7 +174,7 @@
   <text x="1124" y="26" class="t" font-weight="700">ntfy.sh · private topic</text>
   <text x="1124" y="44" class="s"><tspan font-weight="700" fill="#cc5de8">IN</tspan>  health report · watchdog · updater</text>
   <text x="1124" y="59" class="s">      mc-backup · Uptime Kuma down/up</text>
-  <text x="1124" y="77" class="s"><tspan font-weight="700" fill="#cc5de8">OUT</tspan> iPhone ntfy app · Homarr widget</text>
+  <text x="1124" y="77" class="s"><tspan font-weight="700" fill="#cc5de8">OUT</tspan> iPhone ntfy app · dashboard Activity</text>
   <text x="1124" y="95" class="s">kept ~12 h on ntfy.sh · via the exit node</text>
   <path d="M1356,106 V345 H967 V376" stroke="#cc5de8" stroke-width="2" stroke-dasharray="2 4" fill="none" marker-end="url(#a-purple)"/>
   <g class="badge"><circle cx="1356" cy="330" r="11" stroke="#cc5de8"/><text x="1356" y="330" fill="#cc5de8">6</text></g>
@@ -218,14 +215,14 @@
   <text x="898" y="724" class="s">from 192.168.1.179 (rule 5209, e.g. port-forwarded Minecraft).</text>
 
   <g class="badge"><circle cx="880" cy="750" r="10" stroke="#4dabf7"/><text x="880" y="750" fill="#4dabf7">4</text></g>
-  <text x="898" y="754" class="s">Remote over tailnet: Dashboard :7576 · Homarr · Kuma :3001 · Beszel :8090.</text>
+  <text x="898" y="754" class="s">Remote over tailnet: Dashboard :7576 · Kuma :3001 · Beszel :8090.</text>
 
   <g class="badge"><circle cx="880" cy="780" r="10" stroke="#4dabf7"/><text x="880" y="780" fill="#4dabf7">5</text></g>
   <text x="898" y="784" class="s">Monitoring: Kuma ping + Beszel hub → Pi agent :45876.</text>
 
   <g class="badge"><circle cx="880" cy="810" r="10" stroke="#cc5de8"/><text x="880" y="810" fill="#cc5de8">6</text></g>
   <text x="898" y="808" class="s">Alerts → ntfy.sh (private topic): health report, watchdog, updater,</text>
-  <text x="898" y="824" class="s">backups + Uptime Kuma → iPhone ntfy app + Homarr Notifications widget.</text>
+  <text x="898" y="824" class="s">backups + Uptime Kuma → iPhone ntfy app (dashboard Activity reads the journal).</text>
 
   <g class="badge"><circle cx="880" cy="845" r="10" stroke="#51cf66"/><text x="880" y="845" fill="#51cf66">7</text></g>
   <text x="898" y="843" class="s">Samsung TV: Plex app streams straight from :32400 over the LAN</text>
@@ -298,7 +295,7 @@
   <rect x="712" y="1177" width="190" height="144" rx="8" fill="#23262d" stroke="#ff8a3d" stroke-width="1.5"/>
   <text x="724" y="1197" class="t" font-weight="700" fill="#ff8a3d">04:00</text>
   <text x="724" y="1215" class="t" font-weight="700">homelab-updater</text>
-  <text x="724" y="1233" class="s">auto: Homarr, Kuma, Beszel</text>
+  <text x="724" y="1233" class="s">auto: Kuma, Beszel</text>
   <text x="724" y="1249" class="s">asks: Minecraft, Dawarich</text>
   <text x="724" y="1265" class="s">backup + auto-rollback</text>
   <text x="724" y="1281" class="s">git pull: GolfApp (GitHub)</text>
@@ -331,6 +328,6 @@
   <rect x="270" y="12" width="230" height="70" rx="10" fill="#14272b" stroke="#3bc9db" stroke-width="1.5"/>
   <text x="385" y="36" class="t" text-anchor="middle" font-weight="700">duckdns.org</text>
   <text x="385" y="55" class="s" text-anchor="middle">example → 203.0.113.10 (home)</text>
-  <text x="385" y="72" class="s" text-anchor="middle">also used by Homarr MC widget</text>
+  <text x="385" y="72" class="s" text-anchor="middle">Minecraft address for friends</text>
   <path d="M242,47 H266" stroke="#3bc9db" stroke-width="2" stroke-dasharray="4 3" fill="none" marker-end="url(#a-teal)" marker-start="url(#a-teal)"/>
 </svg>

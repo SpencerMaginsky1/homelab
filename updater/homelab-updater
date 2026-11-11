@@ -11,7 +11,7 @@
 #   homelab-updater status          versions, holds and backups
 #   homelab-rollback <svc>          same as "homelab-updater rollback <svc>"
 #
-# Services: homarr, uptime-kuma, beszel (auto) · dawarich, minecraft (ask) · plex (snap auto-updates itself)
+# Services: uptime-kuma, beszel (auto) · dawarich, minecraft (ask) · plex (snap auto-updates itself)
 #           dawarich: patch releases (1.19.0 → 1.19.1) and redis/postgis rebuilds are applied automatically;
 #           minor/major releases ask. Every Dawarich update takes a pg_dump first and rolls back if points go missing.
 #           golfapp (git: fast-forward pull of main from GitHub, as $REPO_USER; never overwrites local work)
@@ -31,16 +31,16 @@ MC_DIR="/home/spencer/Desktop/MineCraft Server"
 MC_USER=spencer
 ALPINE=alpine:3.20
 
-declare -A DIR=([homarr]=$DOCKER_DIR/homarr [uptime-kuma]=$DOCKER_DIR/uptime-kuma
+declare -A DIR=([uptime-kuma]=$DOCKER_DIR/uptime-kuma
                 [beszel]=$DOCKER_DIR/beszel [dawarich]=$DOCKER_DIR)
-declare -A POLICY=([homarr]=auto [uptime-kuma]=auto [beszel]=auto [dawarich]=ask [minecraft]=ask [plex]=snap [golfapp]=git)
+declare -A POLICY=([uptime-kuma]=auto [beszel]=auto [dawarich]=ask [minecraft]=ask [plex]=snap [golfapp]=git)
 REPO_USER=spencer
 declare -A REPO=([golfapp]=/home/spencer/Desktop/GolfApp)   # served by homelab-golf.service, so a pull goes live there at once
-declare -A DATA=([homarr]="bind:appdata" [uptime-kuma]="bind:data" [beszel]="bind:beszel_data"
+declare -A DATA=([uptime-kuma]="bind:data" [beszel]="bind:beszel_data"
                  [dawarich]="vol:docker_dawarich_db_data vol:docker_dawarich_public vol:docker_dawarich_shared vol:docker_dawarich_storage vol:docker_dawarich_watched")
-declare -A HEALTH=([homarr]=http://127.0.0.1:7575 [uptime-kuma]=http://127.0.0.1:3001
+declare -A HEALTH=([uptime-kuma]=http://127.0.0.1:3001
                    [beszel]=http://127.0.0.1:8090 [dawarich]=http://127.0.0.1:3000/api/v1/health)
-DOCKER_STACKS=(homarr uptime-kuma beszel dawarich)
+DOCKER_STACKS=(uptime-kuma beszel dawarich)
 
 if [[ $EUID -ne 0 && -z ${HOMELAB_TEST:-} ]]; then echo "run with sudo"; exit 1; fi
 mkdir -p "$STATE" "$BACKUP_ROOT"
@@ -61,7 +61,7 @@ http_ok() { curl -s -o /dev/null -m 8 -L -w '%{http_code}' "$1" | grep -qE '^(2|
 begin()   { touch "$FLAG"; }
 finish()  { rm -f "$FLAG"; }
 trap finish EXIT
-known()   { [[ -n ${POLICY[$1]:-} ]] || { echo "unknown service '$1' (homarr uptime-kuma beszel dawarich minecraft plex golfapp)"; exit 1; }; }
+known()   { [[ -n ${POLICY[$1]:-} ]] || { echo "unknown service '$1' (uptime-kuma beszel dawarich minecraft plex golfapp)"; exit 1; }; }
 
 img_ver() {  # human version for an image id/ref
   local v; v=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$1" 2>/dev/null)

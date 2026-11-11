@@ -64,8 +64,7 @@ MagicDNS works: `spencer-server`, `raspberrypi` and so on resolve on any tailnet
 
 | Service | URL | Runs as | Location | Auto-start |
 |---|---|---|---|---|
-| **Dashboard** (custom, replacing Homarr) | http://192.168.1.179:7576 (3.14) | Docker (2 containers: `dashboard` + read-only `dashboard-docker-proxy`, built locally) | `~/Desktop/docker/dashboard/` | `restart: unless-stopped` |
-| **Homarr** (old dashboard) | http://192.168.1.179:7575 | Docker (2 containers: `homarr` + read-only `docker-proxy`) | `~/Desktop/docker/homarr/` | `restart: unless-stopped` |
+| **Dashboard** (custom; replaced Homarr 2026-11-11) | http://192.168.1.179:7576 (3.14) | Docker (2 containers: `dashboard` + read-only `dashboard-docker-proxy`, built locally) | `~/Desktop/docker/dashboard/` | `restart: unless-stopped` |
 | **Uptime Kuma** (up/down monitoring) | http://192.168.1.179:3001 | Docker, host network | `~/Desktop/docker/uptime-kuma/` | `restart: unless-stopped` |
 | **Beszel** (CPU/RAM/temp/disk/network graphs) | http://192.168.1.179:8090 | Docker hub + agent, host network | `~/Desktop/docker/beszel/` | `restart: unless-stopped` |
 | **Dawarich** (location history) | http://192.168.1.179:3000 | Docker (3 containers) | `~/Desktop/docker/docker-compose.yml` | `always` / `unless-stopped` |
@@ -86,38 +85,16 @@ Dawarich only accepts the hostnames listed in its `APPLICATION_HOSTS` setting: `
 | Every 5 min | `duckdns-update`: keeps `example.duckdns.org` on the home IP | 3.8 |
 | Every 15 min | `homelab-watchdog`: restarts what doesn't restart itself | 3.7 |
 | **03:30** | `mc-backup`: live Minecraft world backup (5-min player warning if anyone is online) | 3.11 |
-| **04:00** | `homelab-updater`: auto-updates Homarr, Kuma and Beszel; auto-applies low-risk Dawarich updates; 📦 asks about Minecraft and major Dawarich releases; pulls GolfApp from GitHub | 3.10, 3.12 |
+| **04:00** | `homelab-updater`: auto-updates Kuma and Beszel; auto-applies low-risk Dawarich updates; 📦 asks about Minecraft and major Dawarich releases; pulls GolfApp from GitHub | 3.10, 3.12 |
 | **08:00** | `homelab-healthcheck`: daily ✅/⚠️/🚨 report to ntfy (Claude summary on problems) | 3.6 |
 | Continuous | Uptime Kuma checks every 60 s and pushes down/up alerts | 3.2 |
 
-All times are New York time. Every push goes to the same private ntfy topic, which is also shown on the Homarr Notifications widget. The new dashboard's Activity page (3.14) shows the same events straight from the system journal, going back 30 days.
+All times are New York time. Every push goes to the same private ntfy topic, and the dashboard's Activity page (3.14) shows the same events straight from the system journal, going back 30 days.
 
-### 3.1 Homarr (old dashboard)
-- **Being replaced by the custom dashboard (3.14, :7576)**; still running until that has proven itself (see to-dos). Until then it's unchanged. **Board contents** (as of 2026-10-17):
-
-| Widget | Integration | Notes |
-|---|---|---|
-| **Uptime Kuma** | Uptime Kuma, `http://192.168.1.179:3001` | Reads the Kuma status page with slug `home` |
-| **Beszel Systems (Grid)** | Beszel, `http://192.168.1.179:8090` | spencer-server and raspberrypi side by side. The login is the Beszel **email** plus password |
-| **Notifications** | ntfy, `https://ntfy.sh` | History of the private topic: daily health reports, watchdog 🔧/🚨 pushes, Uptime Kuma down/up. The topic is stored encrypted in Homarr; **no API key** is needed. ntfy.sh only keeps about **12 h**, so the widget shows roughly the last half-day (the phone keeps everything) |
-| **Docker Containers** | none (env vars) | Added 2026-10-31. Lists every container with state, CPU and RAM. Homarr reads Docker through the **`docker-proxy`** container (`tecnativa/docker-socket-proxy`) in the same compose stack, set by `DOCKER_HOSTNAMES=docker-proxy` / `DOCKER_PORTS=2375`. The proxy is **read-only** (`CONTAINERS=1`, `INFO=1`, `POST=0`): start/stop/restart buttons in the widget return 403, which is on purpose. It isn't published on the host, only reachable on `br-homarr`. Don't mount `docker.sock` into Homarr directly (that's root on the host). To allow controls later, set `POST=1` on the proxy |
-| **Minecraft Server Status** | none | Address `example.duckdns.org` (Java). Queried through the public `api.mcsrvstat.us`, so it only works because the server is internet-reachable, and it lags about 5 min (cache) |
-| **Weather**, **Date and time** | none | |
-| App tiles | none | Including **Dawarich** and **GolfApp** (`http://192.168.1.179:8001`), both with a status check. Homarr also auto-created an "ntfy" app when the integration was added |
-
-- Runs on its **own Docker bridge, `br-homarr` (172.19.0.0/16)**, with only port 7575 published. **Don't switch it to host networking.** It runs internal services on 3000, 3001 and 6379 that clash with dawarich and Uptime Kuma, and the container then crash-loops.
-- Integration URLs inside Homarr must use **`http://192.168.1.179:<port>`**. `localhost` from inside its container means the container itself.
-- **Beszel login in Homarr uses the email address**, not a username (Beszel only accepts email). A 400 "auth-with-password" error means the login details are wrong.
-- **Version:** **v2.6.0** (updated 2026-10-15 from v2.5.2; no schema changes, board and integrations carried over). **Updates are now automatic** via `homelab-updater` (3.10), and `sudo homelab-rollback homarr` undoes one. The manual method used for v2.6.0 is kept below for reference. **Before a manual update, check the release notes** (https://github.com/homarr-labs/homarr/releases) for breaking changes. Then:
-  1. Back up: `docker compose stop`, then copy `appdata/` (`backups/appdata-<version>-<date>.tgz`, made with a root alpine container because `appdata/db` is root-owned).
-  2. Tag the old image: `docker tag ghcr.io/homarr-labs/homarr:latest homarr-rollback:<version>`.
-  3. Run `docker compose pull && docker compose up -d`.
-  - **Rollback:** set `image: homarr-rollback:v2.5.2` in `compose.yml`, restore the matching `backups/*.tgz` into `appdata/`, then `docker compose up -d`.
-  - The startup log shows a Redis "Memory overcommit must be enabled" warning from Homarr's built-in Redis. It's harmless and has been there since install.
-- `.env` holds `SECRET_ENCRYPTION_KEY`. **Back it up together with `appdata/`.** Without it, the saved integration credentials can't be decrypted.
-- Port 7575 is published through Docker, which **bypasses ufw**. It's reachable from the LAN and tailnet, but not the internet, because the router doesn't forward it.
-
-- **"VS Code (Server)" tile** (added 2026-10-28): opens VS Code on the main PC straight into this folder over Remote-SSH. URL `vscode://vscode-remote/ssh-remote+spencer-server/home/spencer/Desktop/Claude` (the host name comes from the PC's `~/.ssh/config`; use `spencer-server-ts` for Tailscale). **Status check off**, since Homarr can't ping a `vscode://` link. It only works on a computer with VS Code and that SSH config, and does nothing on a phone. **To stop Chrome asking "Open Visual Studio Code?" each time:** Chrome only shows the "Always allow" checkbox on HTTPS pages, so it was enabled once through `chrome://flags/#unsafely-treat-insecure-origin-as-secure` (`http://192.168.1.179:7575,http://spencer-server:7575`) → relaunch → tick **Always allow** → set the flag back to **Disabled**. The choice stays saved. If Chrome starts asking again, repeat that, or set the Chrome policy `AutoLaunchProtocolsFromOrigins` = `[{"protocol":"vscode","allowed_origins":["http://192.168.1.179:7575"]}]` under `HKLM\SOFTWARE\Policies\Google\Chrome`.
+### 3.1 Homarr (retired 2026-11-11)
+- Replaced by the custom dashboard (3.14, :7576). Containers `homarr` and `docker-proxy` and the `br-homarr` network were removed, along with the image and its updater rollback copies. It's no longer in the updater, health check, watchdog, Uptime Kuma or ufw.
+- **Archive:** `~/Desktop/docker/_retired/homarr-2026-11-11/` holds `compose.yml`, `.env` (`SECRET_ENCRYPTION_KEY`, needed to decrypt the saved integrations) and `appdata/` (board, integrations). To bring it back: move the folder back to `~/Desktop/docker/homarr`, `docker compose up -d`, then re-add the `br-homarr` ufw rules and the updater, health check, watchdog and Kuma entries (see git history in `homelab-private`). Delete the archive once you're sure you won't want it.
+- The "VS Code (Server)" tile it had (`vscode://vscode-remote/ssh-remote+spencer-server/home/spencer/Desktop/Claude`) can be added to the dashboard's quick links if you miss it.
 
 ### 3.2 Uptime Kuma (monitoring)
 - Image `louislam/uptime-kuma:2`, `network_mode: host`, data in `./data` (SQLite).
@@ -129,11 +106,10 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
 | Exit Node - Pi Reachable | Ping | `100.64.0.20` |
 | Exit Node - Traffic via PI | HTTP keyword | `https://ifconfig.me/ip` must contain `198.51.100.20` |
 | Dawarich | HTTP | `http://127.0.0.1:3000/api/v1/health` (changed 2026-10-19) |
-| Homarr | HTTP | `http://127.0.0.1:7575` |
 | GolfApp | HTTP | `http://127.0.0.1:8001` (added 2026-10-17) |
 | Ship Tracker | HTTP | `http://127.0.0.1:8100/health` (added 2026-10-19; goes down if the ship feed stops, not only the page) |
 
-- Status page: **`/status/home`**, which feeds the Homarr widget. It has all 9 monitors (Dashboard and Plex added 2026-11-05). **When you add a monitor, also add it to this status page** or it won't show up in Homarr.
+- Status page: **`/status/home`**. It has all 8 monitors (Dashboard and Plex added 2026-11-05; Homarr removed 2026-11-11). **When you add a monitor, also add it to this status page** to keep it complete.
 - Because it uses host networking, local services are checked at `127.0.0.1`.
 - If the Pi's ISP changes its WAN IP, "Traffic via PI" will go red. Update the keyword when that happens.
 - **Notifications:** "Phone (ntfy)" is on for **all monitors** and is "Default enabled", so new monitors get it too. It uses the same private topic as the health check (see 3.6). It pushes once when a monitor goes **down** (after 3 failed checks, about 3 min, because retries = 2) and once when it comes back **up**. It's silent while healthy. Test it from Settings → Notifications → Phone (ntfy) → Test.
@@ -147,7 +123,7 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
 
 ### 3.4 Dawarich
 - Compose project `docker` in `~/Desktop/docker/` with app, redis and postgis. Since 1.17.0 the background jobs (Sidekiq) run **inside `dawarich_app`** (`SIDEKIQ_EMBEDDED: 'true'`, `WEB_CONCURRENCY: '0'`, 2 job threads, 1 CPU). There is no `dawarich_sidekiq` container any more: don't add it back. Network `docker_dawarich` (172.18.0.0/16).
-- No Homarr integration exists for it, so it's an App tile plus an Uptime Kuma HTTP monitor.
+- Monitored by an Uptime Kuma HTTP monitor.
 - **Health URL:** `http://127.0.0.1:3000/api/v1/health` (returns `{"status":"ok"}`). Since 1.16.0, `/` redirects to the sign-in page, so the updater, the 08:00 health check and the Uptime Kuma monitor use the health URL (changed 2026-10-19).
 - **Extra database dumps** before risky updates: `docker exec dawarich_db pg_dump -U postgres -d dawarich_development -Fc > ~/dawarich-backups/dawarich-<version>-<date>.dump` (owner-only, ~8 MB). Restore into an empty database with `pg_restore`. A dump of 1.15.3 (6,174 points, 2026-10-07 → 2026-10-18) was taken on 2026-10-19 before the 1.16.0 update. A dump of 1.16.0 (6,917 points, 2026-10-06 → 2026-10-22) was taken on 2026-10-25 before 1.17.0, along with the old compose file (`docker-compose-1.16.0.yml`). A dump of 1.17.0 (7,774 points) was taken on 2026-10-27 before 1.18.1, along with `docker-compose-1.17.0.yml`. A dump of 1.18.1 (7,824 points, 2026-10-07 → 2026-10-28) was taken on 2026-10-28 before 1.19.0, along with `docker-compose-1.18.1.yml`, and test-restored into a scratch database (all points present). **1.19.0 has a migration that can't be rolled back** (geofence events kept after their place is deleted), so a rollback from it needs that dump restored. The previous version's image is kept as `freikin/dawarich:1.18.1-rollback` (the 1.16.0 and 1.17.0 ones were removed). **To roll back by hand:** set the `image:` line to that tag and run `docker compose up -d`. A database written by a newer version may need the matching dump restored. 1.18 runs one-time background jobs (Areas become Places, visits are re-detected) that a rollback doesn't undo.
 
@@ -171,7 +147,7 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
   - **System:** disk usage, free RAM, load, CPU temperature, failed systemd units, SSD SMART health, recent reboot, pending updates, and **reboot required** (`/var/run/reboot-required`, with the packages that need it).
   - **Network:** Tailscale up, exit node online, public IP is the Pi's `198.51.100.20`, rules 5208/5209, IP forwarding, ICMP redirects off, ufw active, gateway NAT rule, router ping, DNS, and **`example.duckdns.org` resolves to the current home IP** (home IP looked up via `curl --interface 192.168.1.179`; the stats line shows `Home: <ip>`).
   - **Tailnet:** Pi ping, Pi's Beszel agent port.
-  - **Services:** every Docker container running and healthy, web UIs (Homarr, Uptime Kuma, Beszel, Dawarich, Plex), GolfApp on :8001 (⚠️ warning only, not a failure), Plex service, Minecraft tmux session and port, and any Uptime Kuma monitor that is currently down.
+  - **Services:** every Docker container running and healthy, web UIs (Uptime Kuma, Beszel, Dawarich, Plex), GolfApp on :8001 (⚠️ warning only, not a failure), Plex service, Minecraft tmux session and port, and any Uptime Kuma monitor that is currently down.
   - **Automation:**
     - the **Minecraft backup** (warns if the last good one is over 26 h old, fails over 72 h or if it never succeeded)
     - **updater activity** from its own history file: updated in the last 24 h (including GolfApp GitHub pulls), waiting for your approval, on hold, or failed, plus a ⚠️ if a GitHub pull failed
@@ -204,7 +180,7 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
 | Minecraft running but port 25565 not answering for 2 runs | — | **Alert only.** Never killed automatically, because that could damage the world |
 | Docker, Tailscale or Plex in systemd state **failed** | systemd gave up after its start limit | `systemctl reset-failed` + `start` |
 | Plex active but `/identity` not answering for 2 runs | Hangs aren't crashes | `systemctl restart` Plex |
-| Homarr or Beszel running but web UI dead for 2 runs | They have no Docker healthcheck | `docker restart` |
+| Beszel running but web UI dead for 2 runs | They have no Docker healthcheck | `docker restart` |
 | Any container **unhealthy** for 2 runs | Docker never restarts unhealthy containers | `docker restart` |
 
 - **Left alone on purpose:**
@@ -225,7 +201,7 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
 - The **8 AM daily report** lists anything the watchdog restarted (⚠️) or failed to fix (🚨) in the previous 24 h.
 
 ### 3.8 DuckDNS: `example.duckdns.org` (Minecraft address for friends)
-- **Friends join with `example.duckdns.org`** (port 25565 is the default), so the home IP changing no longer matters. The Homarr **Minecraft Server Status** widget uses the same address. That widget queries `api.mcsrvstat.us` from the internet, and its data is cached for about 5 min.
+- **Friends join with `example.duckdns.org`** (port 25565 is the default), so the home IP changing no longer matters.
 - Set up 2026-10-15 and verified: the name resolves to `203.0.113.10`, and `api.mcsrvstat.us` sees the server online (26.3) at that name. The account is on duckdns.org, where you signed in and claimed the subdomain `example`.
 - `taken.duckdns.org` was already taken by someone else.
 - **It must point at the HOME IP, not the Pi.** This server's traffic normally exits via the Pi (`198.51.100.20`), so a normal DuckDNS update would register the wrong IP. `duckdns-update` binds its request to the LAN IP (`curl --interface 192.168.1.179`), so rule 5209 sends it out the home WAN and DuckDNS sees the home IP (`203.0.113.10` at setup).
@@ -261,7 +237,7 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
 
 | Service | Policy | What happens when a new version appears |
 |---|---|---|
-| Homarr, Uptime Kuma, Beszel (hub + agent) | **auto** | Backup, update, health check, push **🆙 "Updated X: old → new"** |
+| Uptime Kuma, Beszel (hub + agent) | **auto** | Backup, update, health check, push **🆙 "Updated X: old → new"** |
 | Dawarich (app, redis, postgis) | **auto if low-risk, else ask** | **Applied automatically** (🆙 push "automatic: low-risk"): Dawarich patch releases (`1.19.0 → 1.19.1`) and rebuilds of the pinned `redis:7.4-alpine` / `postgis:17-3.5-alpine` images. **Asks first** (📦 "Update available", then a low-priority 📦 "Still waiting" each 04:00 until applied): minor/major releases (`1.19 → 1.20`; these have changed containers before, e.g. 1.17.0 removed sidekiq) and any version it can't parse (`-rc`, missing label). **Every Dawarich update** (automatic or `sudo homelab-updater apply dawarich`) first takes a `pg_dump` into the backup folder (`dawarich.dump`, restore with `pg_restore`) and aborts if that fails, counts location points before and after, and **rolls back automatically if any are missing**. The 🆙 push shows the before → after point count |
 | Minecraft (vanilla, stable releases only, no snapshots) | **ask** | Push 📦. Apply with `sudo homelab-updater apply minecraft`. It refuses while players are online (use `--force` to override). **Players must update their game to the same version.** |
 | Plex | snap (updates itself about 4×/day) | The updater only notices the change and pushes 🆙 with the rollback command |
@@ -328,7 +304,7 @@ All times are New York time. Every push goes to the same private ntfy topic, whi
 - **Clone:** `~/Desktop/GolfApp`, with git identity set repo-locally to the GitHub noreply address. GitHub login: `gh auth status` (account `SpencerMaginsky1`, HTTPS via the gh credential helper).
 - **Kept current automatically** by the 04:00 updater (3.10). The web server reads the files directly, so a pull is live on :8001 straight away with no restart.
 - **Working on it:** pull first, use a **branch plus pull request**, and never push to `main`, because every push to `main` goes live on the friend's Netlify site. The repo's own `CLAUDE.md` has the friend's rules: test before pushing (Indian Island → Start round → next hole → End round, no page errors) and write commit messages as a summary line plus bullets. Leave the clone on `main` with no uncommitted edits when you're done, or the nightly pull skips it.
-- **Monitoring:** Uptime Kuma HTTP monitor "GolfApp" (down/up pushes; add it to the `home` status page so it also shows in Homarr's Kuma widget), the Homarr tile's status dot, and a ⚠️ in the 08:00 health check if it isn't answering. The watchdog does **not** restart it; systemd restarts it only if it crashes.
+- **Monitoring:** Uptime Kuma HTTP monitor "GolfApp" (down/up pushes, on the `home` status page), and a ⚠️ in the 08:00 health check if it isn't answering. The watchdog does **not** restart it; systemd restarts it only if it crashes.
 - **Commands:** `systemctl status homelab-golf` · `sudo homelab-updater apply golfapp` (pull now) · `journalctl -t homelab-updater | grep golfapp`.
 
 ### 3.13 Ship Tracker (live AIS map, added 2026-10-19)
@@ -418,7 +394,7 @@ This server is a "one-armed" gateway: it has a single NIC, on the same subnet as
 5210+ / 5270: Tailscale's own rules (table 52 = exit node)
 ```
 - **Table 128** has `192.168.1.0/24 dev enp2s0` and `default via 192.168.1.1`. Rule **5209** makes anything sent *from* the LAN IP use the normal home connection. That keeps inbound connections (for example the router's port-forward to Minecraft) answered from the same IP they arrived on, instead of the replies going out through the Pi.
-- Rule **5208** exists because of 5209. Containers on Docker bridges, such as Homarr, connect to `192.168.1.179:<port>`. The replies are sent *from* 192.168.1.179, and without 5208 table 128 would send them to the router instead of back to the bridge. Symptom: Homarr gets "connect timeout" on Uptime Kuma or Beszel.
+- Rule **5208** exists because of 5209. Containers on Docker bridges (such as the dashboard and Dawarich) that connect to `192.168.1.179:<port>`. The replies are sent *from* 192.168.1.179, and without 5208 table 128 would send them to the router instead of back to the bridge. Symptom: a container gets "connect timeout" on Uptime Kuma or Beszel.
 - **Made persistent by** the NetworkManager dispatcher script **`/etc/NetworkManager/dispatcher.d/50-policy-routing`** (root:root 755). It runs on `enp2s0` up, DHCP renewals and reapply. It reads the current IP, gateway and subnet, then re-adds both rules at **fixed priorities 5208/5209**, so they always sit above Tailscale's. It logs with tag `policy-routing`.
 
 ### 4.4 Firewall (ufw) rules
@@ -429,12 +405,10 @@ This server is a "one-armed" gateway: it has a single NIC, on the same subnet as
 | `allow from 192.168.1.0/24 to any port 32400 proto tcp` | Plex from the LAN. Plex over Tailscale and the GDM discovery ports 32410–32414/udp are **not** allowed yet |
 | `allow from 192.168.1.0/24 to any port 3001,8090` (two rules) | Uptime Kuma and Beszel from the LAN |
 | `allow in on tailscale0 to any port 3001,8090` | Uptime Kuma and Beszel over Tailscale |
-| `allow in on br-homarr to any port 3001,8090` | Homarr container → Uptime Kuma and Beszel |
 | `allow from 192.168.1.0/24 to any port 8001 proto tcp` + `allow in on tailscale0 to any port 8001 proto tcp` | GolfApp from the LAN and tailnet (3.12) |
-| `allow in on br-homarr to any port 8001 proto tcp` | Homarr container → GolfApp (its tile's status check) |
 | `route allow in on enp2s0 out on tailscale0 from 192.168.1.0/24` | LAN gateway forwarding |
 
-Ports published by Docker (dawarich 3000, Homarr 7575) **don't go through ufw**.
+Ports published by Docker (dawarich 3000, dashboard 7576) **don't go through ufw**.
 
 ---
 
@@ -455,7 +429,7 @@ ls ~/.homelab-maintenance 2>/dev/null        # should NOT exist unless you're do
 getent hosts example.duckdns.org            # must equal the home IP below
 curl -4 -s --interface 192.168.1.179 ifconfig.me; echo   # home IP (203.0.113.10 at setup)
 journalctl -t duckdns -n 5                   # updater: 'updated' / 'FAILED' lines only
-docker ps --format '{{.Names}}\t{{.Status}}' # 11 containers up
+docker ps --format '{{.Names}}\t{{.Status}}' # 9 containers up (Homarr + its proxy retired 2026-11-11)
 systemctl is-active homelab-docs homelab-golf  # docs :8000 + GolfApp :8001 web servers
 systemctl --user is-active mc-console-bridge   # dashboard's Minecraft console (no sudo)
 sudo ufw status verbose
@@ -471,11 +445,9 @@ Then open the dashboard (http://192.168.1.179:7576): the header should say **All
 | SSH drops when the exit node is turned on | LAN access is off. Run `sudo tailscale set --exit-node-allow-lan-access=true` (from the server's own console). |
 | Disk use creeps up a few GB a week | Normal. Each update keeps the old image for rollback (up to 3 per service; Uptime Kuma is about 2.5 GB and Dawarich about 3 GB each), and the total levels off. Check with `docker system df`. Safe cleanup: `docker image prune -f` (untagged leftovers only) and any hand-made `*-rollback` tags you no longer need. Leave the `homelab-rollback:*` images to the updater. |
 | Server's public IP shows `203.0.113.10` | Exit node isn't active. Check `tailscale status`, and check that the Pi is online. |
-| Homarr "connect timeout" to Uptime Kuma or Beszel | Rule 5208 missing, so run the dispatcher manually (below). Or the `br-homarr` ufw rule is missing. |
-| Homarr Beszel "400 auth-with-password" | Use the Beszel **email** plus password. |
+| A container gets "connect timeout" to Uptime Kuma or Beszel | Rule 5208 missing, so run the dispatcher manually (below). Or that bridge has no ufw rule. |
 | A Kuma monitor shows 100% packet loss | Check the target IP for typos. The Pi is `100.64.0.20`. |
 | A tunneled client loads some sites but not others | MSS clamp missing from `before.rules` (needs `sudo ufw reload`). |
-| A new monitor doesn't show in the Homarr widget | Add it to the Kuma status page `home`. |
 | Minecraft didn't start after reboot | Check `crontab -l` and `tmux ls`. Start it by hand with `/bin/sh "/home/spencer/Desktop/MineCraft Server/minecraftServer.sh"`. The watchdog also starts it 10–25 min after boot if cron didn't. |
 | Minecraft (or another service) keeps coming back after you stopped it | That's the watchdog. Run `touch ~/.homelab-maintenance` before planned work, and `rm` it afterwards. |
 | 🚨 "auto-restart limit reached" push | The watchdog tried 3 times in 6 h and gave up. Check `journalctl -t homelab-watchdog -n 30` and the service's own logs (for Minecraft: `tmux attach -t minecraft`). |
@@ -483,13 +455,11 @@ Then open the dashboard (http://192.168.1.179:7576): the header should say **All
 | Friends can't join `example.duckdns.org` | 1) `getent hosts example.duckdns.org` must equal the home IP (`curl -4 --interface 192.168.1.179 ifconfig.me`). If not, check `journalctl -t duckdns` and run `sudo duckdns-update`. 2) Check the router's port-forward (TCP 25565 → 192.168.1.179). 3) Check the player is on the whitelist. |
 | You can't join via `example.duckdns.org` from home | The router doesn't do NAT loopback. Use `192.168.1.179` on the LAN. |
 | DuckDNS points to the Pi's IP (`198.51.100.20`) | The updater went out via the exit node. It must use `--interface <LAN IP>`; check that rule 5209 exists (`ip rule`). |
-| Homarr Minecraft widget shows offline but Uptime Kuma says up | It goes through the internet and the DuckDNS name, so check the DuckDNS row above. Changes also take up to ~5 min to show (mcsrvstat cache). |
 | An auto-update broke something | `sudo homelab-rollback <svc>` restores the previous version plus data and holds it. Check `journalctl -t homelab-updater` for what changed. |
 | 📦 "Update available" / "Still waiting" for Minecraft or Dawarich | Not applied on purpose. Read the release notes, then `sudo homelab-updater apply <svc>` (Minecraft: with 0 players online, and tell friends to update their game). |
 | A service never updates any more | It's probably **on hold** after a rollback: run `sudo homelab-updater status`, then `sudo homelab-updater unhold <svc>`. |
 | Need to undo griefing, corruption or a mistake in the world | `sudo mc-backup list`, pick the last good point, then `sudo mc-backup restore <ID>`. The current world is kept as `world.before-restore-*`. |
 | 🚨 "Minecraft backup failed" | `journalctl -t mc-backup -n 30`. If it says saving wasn't confirmed, check the server is responsive (`tmux attach -t minecraft`). Saving is always switched back on. |
-| GolfApp tile in Homarr is red, but http://192.168.1.179:8001 works | The `br-homarr` ufw rule for 8001 is missing (Homarr's pings get blocked: `journalctl -k \| grep 'UFW BLOCK' \| grep 8001`). Re-run `sudo bash ~/Desktop/Claude/golf-server/install.sh`. |
 | GolfApp doesn't show your friend's latest changes | The 04:00 pull skips the clone if it's on another branch or has uncommitted edits: `journalctl -t homelab-updater \| grep golfapp`, then `git -C ~/Desktop/GolfApp status`. Pull now with `sudo homelab-updater apply golfapp`. |
 | Daily report: "Failed systemd units: user@1000.service" | Your per-user systemd manager got stuck stopping after the last login session closed. The snap desktop helper's `xdg-document-portal` doesn't exit within Ubuntu's 5 s stop limit, so it was killed and marked failed. This happened on every logout. Fixed 2026-10-19 with `loginctl enable-linger spencer` (no sudo needed), which keeps the user manager running all the time. Check it with `loginctl show-user spencer -p Linger`. If it ever shows up again: `sudo systemctl reset-failed user@1000.service`. |
 | Kernel log shows `ata4.00: exception ... host bus error`, `failed command: WRITE FPDMA QUEUED`, or `EXT4-fs ... I/O error` | The server booted the 7.0 kernel, which has SATA errors on this board (see the Kernel row in 2). Check with `uname -r`. Go back to 6.14 straight away: `sudo grub-reboot 'Advanced options for Ubuntu>Ubuntu, with Linux 6.14.0-37-generic' && sudo reboot`. Then check `grep GRUB_DEFAULT /etc/default/grub` still names 6.14 and run `sudo update-grub`. |
@@ -503,8 +473,8 @@ sudo /etc/NetworkManager/dispatcher.d/50-policy-routing enp2s0 up
 ## 7. Common tasks
 *More in [COMMANDS.md](COMMANDS.md): updates and rollback §5, backups and restore §6, the Minecraft console §7, Docker §10.*
 
-- **Update a service:** this is automatic for Homarr, Uptime Kuma and Beszel at 04:00. Otherwise run `sudo homelab-updater apply <svc>`, which backs up, updates, health-checks and rolls back if needed (3.10). Avoid a bare `docker compose pull && up -d`, because it skips the backup and rollback tag.
-- **Add a service to monitoring:** add an Uptime Kuma monitor (use `127.0.0.1:<port>` for local services), add it to status page `home`, and optionally add a Homarr App tile using `http://192.168.1.179:<port>`.
+- **Update a service:** this is automatic for Uptime Kuma and Beszel at 04:00. Otherwise run `sudo homelab-updater apply <svc>`, which backs up, updates, health-checks and rolls back if needed (3.10). Avoid a bare `docker compose pull && up -d`, because it skips the backup and rollback tag.
+- **Add a service to monitoring:** add an Uptime Kuma monitor (use `127.0.0.1:<port>` for local services), add it to status page `home`, and optionally add a quick link on the dashboard.
 - **Add another machine to Beszel:** Beszel → Add System → Binary → copy the command and run it on the machine. If you add it over Tailscale, use its `100.x` IP and port 45876.
 - **Turn the exit node off temporarily:** `sudo tailscale set --exit-node=`. Turn it back on with `sudo tailscale set --exit-node=raspberrypi --exit-node-allow-lan-access=true`.
 - **Backups worth keeping:** `~/Desktop/docker/` (all compose files, `.env` files and data dirs), `~/Desktop/MineCraft Server/world`, `/etc/ufw/before.rules`, `/etc/sysctl.d/99-gateway.conf`, `/etc/NetworkManager/dispatcher.d/50-policy-routing`, `/etc/homelab-healthcheck.conf` (holds the ntfy topic), `/etc/duckdns.conf` (holds the DuckDNS token; also keep the duckdns.org login). **`/etc/mc-backup.pass`** (the Minecraft backup password; without it the restic backups are unreadable). The Minecraft restic repository is `/var/backups/minecraft-restic`. Pre-update backups are in `/var/backups/homelab/` (last 3 per service; copy them off the machine if you want them to survive a disk failure). Sources and installers for all the homelab tools are in `~/Desktop/Claude/` (`healthcheck/`, `updater/`, `duckdns/`, `mc-backup/`, `docs-server/`, `golf-server/`). The GolfApp itself needs no backup, because GitHub has it.
@@ -581,12 +551,12 @@ Leave the policy-routing dispatcher in place unless you also remove whatever nee
 - [ ] **Dashboard (3.14): where we left off (2026-11-05 01:20).** Built and running at :7576 with real data everywhere: servers (picker for spencer-server/raspberrypi), Uptime Kuma, containers, activity with a page per message, Minecraft page + password console, weather for Murray Hill (5-day, hour-by-hour per day, rain times), 12-hour times, phone layout with a 5-tab bar, Home Screen app. **Still open:**
   1. ~~Test the Minecraft console end to end.~~ Done 2026-11-05 18:15: **list** works from the dashboard. It first failed with "isn't running in its tmux session" because `start.sh` runs Java as a child, so tmux names the pane `sh`; the bridge now checks for Java in the pane's foreground job instead.
   2. ~~Check the phone layout on a real phone~~ Done 2026-11-05: looks and works fine on Spencer's phone.
-  3. Homarr retirement below.
+  3. ~~Homarr retirement~~ Done 2026-11-11 (3.1).
   5. ~~Lock screen: set the password~~ Done 2026-11-11: password set by Spencer, unlock confirmed in the browser; server answers 401 to the API and the lights until unlocked.
   6. ~~Terminal: set the terminal password~~ Done 2026-11-11: terminal and console passwords set by Spencer (console now hashed, old random one gone); unlock, live shell in tmux `dashboard` and reattach confirmed in the browser.
   4. **Reserve the light plugs' IPs** in the router (Desk Lamp `192.168.1.184` / 00-00-5E-00-53-01, Couch Lamp `192.168.1.185` / 00-00-5E-00-53-02). If either one gets a new IP, its switch shows "Not answering" until `KASA_HOSTS` is updated.
 - [x] ~~**Dashboard (3.14):** Kuma HTTP monitors **Dashboard** (`http://127.0.0.1:7576/ping`) and **Plex** (`http://127.0.0.1:32400/identity`)~~ added 2026-11-05: 60 s checks, ntfy alerts on, both on the `home` status page (9 monitors, all up). Plex's link dot is now green.
-- [ ] **Retire Homarr** once the dashboard has proven itself: `cd ~/Desktop/docker/homarr && docker compose down`, remove it from `homelab-updater`, Kuma and the health check's web UI list, and drop the `br-homarr` ufw rules (4.4).
+- [x] ~~**Retire Homarr**~~ Done 2026-11-11 (3.1). Folder archived in `~/Desktop/docker/_retired/`; delete it once you're sure.
 - [x] ~~Uptime Kuma status page `home`: add the Homarr and GolfApp monitors~~ (done 2026-10-17; all 6 monitors on the page).
 - [x] ~~Install the updated health check (GolfApp check)~~ (done 2026-10-17).
 - [ ] **GolfApp (friend's repo):** course details for courses other than Indian Island (only it is built in; others depend on OpenStreetMap coverage). Ask which courses the owner plays; work on a branch plus pull request (3.12).
@@ -612,12 +582,4 @@ Leave the policy-routing dispatcher in place unless you also remove whatever nee
   - Hook it into the health check (mounted, SMART, usage %), the watchdog, Beszel, Kuma, the dashboard, and these docs.
   - **Open questions:** internal SATA or USB enclosure (free bay and power cable)? What will the friend use it for? Their devices, and are they already on Tailscale? Their quota, and is any of their data irreplaceable?
 - [ ] Consider restricting the Pi's Beszel agent to listen only on its Tailscale IP.
-- [ ] Optional: a dedicated, non-admin Beszel user for Homarr.
-- [ ] **Homarr → Plex widgets** ("Media server streams", plus optionally "Media releases"). Steps:
-  1. `sudo ufw allow in on br-homarr to any port 32400 proto tcp comment 'homarr -> plex'`. Homarr's container (172.19.x) is currently blocked; the kernel log shows `UFW BLOCK IN=br-homarr DPT=32400`.
-  2. Get the token: `sudo grep -oP 'PlexOnlineToken="\K[^"]+' "/var/snap/plexmediaserver/common/Library/Application Support/Plex Media Server/Preferences.xml"`. Paste it only into Homarr; treat it like a password.
-  3. In Homarr, go to Management → Integrations → Plex: URL `http://192.168.1.179:32400` plus the token, then Test and Save.
-  4. On the board, choose Add item → Media server streams → the Plex integration. The widget stays empty until something is playing.
-  5. Add the new ufw rule to the table in 4.4.
 - [x] ~~Homarr widgets: Beszel Grid, Notifications (ntfy), Minecraft, Weather, Clock~~ (2026-10-15).
-- [ ] More Homarr widgets worth adding: Bookmarks (router `192.168.1.1`, Tailscale admin, duckdns.org), Notebook (whitelist, server address), Releases (update tracking for Homarr, Kuma, Beszel and Dawarich). Skip "Docker stats": it needs the Docker socket, which is root-equivalent.
