@@ -1986,8 +1986,14 @@ function startDashboard() {
   lock.started = true;
   lock.lastInput = lock.lastBeat = Date.now();
   document.body.classList.remove("locked");
-  tickClock();
-  setInterval(tickClock, 10_000);
+  // redraw right as each minute turns over (not on a fixed interval, which drifts and gets throttled in the background),
+  // and straight away when the page comes back into view
+  let clockTimer;
+  const scheduleClock = () => { clearTimeout(clockTimer); tickClock(); clockTimer = setTimeout(scheduleClock, 60_000 - (Date.now() % 60_000) + 50); };
+  scheduleClock();
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleClock(); });
+  window.addEventListener("pageshow", scheduleClock);
+  window.addEventListener("focus", scheduleClock);
   route();
   refreshSummary();
   setInterval(() => { if (!document.hidden) refreshSummary(); }, 15_000);

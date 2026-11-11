@@ -580,6 +580,17 @@ Leave the policy-routing dispatcher in place unless you also remove whatever nee
   - **Order:** do all the setup **before the drive arrives, but upload nothing.** `/mnt/storage` stays an empty folder on the SSD. Test it with tiny files, delete them, then `sudo chattr +i /mnt/storage` so nothing can write to the SSD until the drive is mounted over it (this also protects the SSD if the drive ever fails to mount).
   - **When the drive arrives:** SMART long test (~12–16 h), format, mount at `/mnt/storage`, recreate the folders with their owners (write a script for this during setup), restart Samba and the storage containers, then retest the logins. After that, move Plex and add the restic copy. Optionally make the services wait for the mount (`RequiresMountsFor=/mnt/storage`). Don't test kernel 7.0 the same week as adding the SATA drive.
   - Hook it into the health check (mounted, SMART, usage %), the watchdog, Beszel, Kuma, the dashboard, and these docs.
+  - **Security checklist before the friend gets access** (reviewed 2026-11-11). Key facts: Docker-published ports (dashboard 7576, Dawarich 3000, Ship Tracker 8100) **bypass ufw**, so the Tailscale ACL is the real barrier; and the dashboard Terminal gives a shell as `spencer`, who is in the `docker` group (root-equivalent), so the dashboard + terminal passwords effectively guard root.
+    1. **Tailscale ACL, deny by default:** the friend (shared node, `autogroup:shared`) reaches only spencer-server on 445 + the file manager's port. No other ports, no Pi, no other devices. Add ACL `tests` proving 7576/3000/22/8100 are blocked for them. Do this first.
+    2. **Dashboard only for Spencer's devices:** bind 7576 to `192.168.1.179` instead of `0.0.0.0`, keep it out of the friend's ACL; optionally restrict the Terminal to Spencer's tailnet IPs.
+    3. **Samba hardening:** `map to guest = never`, turn usershares off (`usershare allow guests = yes` now), drop `[printers]`/`[print$]`, `server min protocol = SMB3`, `smb encrypt = required`, `hosts allow` = LAN + `100.64.0.0/10`. ufw: 445 from LAN and `tailscale0` only.
+    4. **Friend account:** `nologin` shell, no sudo/docker, only their folder + `shared/`, own Samba password (`smbpasswd -a`), quota.
+    5. **SSH key-only:** `PasswordAuthentication no`, `PermitRootLogin no`, `AllowUsers spencer` (currently only `KbdInteractiveAuthentication no` is set, so passwords are probably still accepted). Test the key login in a second session before restarting sshd.
+    6. **Recoverable data:** restic snapshots of `<friend>/` and `shared/` to a location their account can't write (protects against ransomware synced from their PC).
+    7. **Alerts in the health check:** failed Samba/SSH logins, new tailnet device, drive >85 %, unusual bursts of file changes.
+    8. fail2ban for sshd + Samba (nice-to-have; only Minecraft faces the internet).
+    9. Tailscale key expiry on for the friend's devices; review shared devices now and then (unsharing cuts access instantly).
+    10. Web file manager (File Browser/Nextcloud): non-root container, mount only the storage folders, never the Docker socket or `/home`, 2FA if offered.
   - **Open questions:** internal SATA or USB enclosure (free bay and power cable)? What will the friend use it for? Their devices, and are they already on Tailscale? Their quota, and is any of their data irreplaceable?
 - [ ] Consider restricting the Pi's Beszel agent to listen only on its Tailscale IP.
 - [x] ~~Homarr widgets: Beszel Grid, Notifications (ntfy), Minecraft, Weather, Clock~~ (2026-10-15).
