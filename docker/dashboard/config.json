@@ -5,6 +5,7 @@
     { "name": "Dawarich", "port": 3000, "monitor": "Dawarich" },
     { "name": "GolfApp", "port": 8001, "monitor": "GolfApp" },
     { "name": "Ship Tracker", "port": 8100, "monitor": "Ship Tracker" },
+    { "name": "Tidehold", "port": 8200, "monitor": "Tidehold" },
     { "name": "Plex", "port": 32400, "path": "/web", "monitor": "Plex" }
   ],
   "shortcuts": [

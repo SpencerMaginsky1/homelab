@@ -79,8 +79,8 @@ CONFIG = os.environ.get("CONFIG", os.path.join(HERE, "config.json"))
 # range -> (seconds shown, Beszel record type)
 RANGES = {"1h": (3600, "1m"), "12h": (12 * 3600, "10m"), "24h": (24 * 3600, "20m"), "7d": (7 * 86400, "120m")}
 STACKS = {"docker": "Dawarich", "uptime-kuma": "Monitoring", "beszel": "Monitoring",
-          "ships": "Ship Tracker", "dashboard": "Dashboard"}
-STACK_ORDER = ["Dawarich", "Monitoring", "Ship Tracker", "Dashboard"]
+          "ships": "Ship Tracker", "tidehold": "Tidehold", "dashboard": "Dashboard"}
+STACK_ORDER = ["Dawarich", "Monitoring", "Ship Tracker", "Tidehold", "Dashboard"]
 JOURNAL_TAGS = ["homelab-healthcheck", "homelab-updater", "homelab-watchdog", "mc-backup"]
 ACTIVITY_DAYS = 30
 

@@ -15,6 +15,7 @@ A self-hosted home server on Ubuntu, running Docker services, a Minecraft server
 | **Minecraft server** | Java server for friends, reachable through a DuckDNS address |
 | **Plex** | Media streaming to the TV and other devices on the LAN |
 | **Web app hosting** | A friend's golf web app served to the LAN and tailnet for testing |
+| **Board game server** | Tidehold, a self-written multiplayer hex board game with computer players, played in the browser (code in a separate private repo) |
 
 **Networking:** the server is on a Tailscale tailnet with a Raspberry Pi exit node. Policy routing sends the server's own traffic through the Pi while keeping Minecraft and DuckDNS on the home connection. Details are in [SERVER.md §4](SERVER.md).
 
