@@ -354,6 +354,7 @@ All times are New York time. Every push goes to the same private ntfy topic, and
 - **Config:** `compose.yml` sets `INVITE_URL` (the address the **Copy link** button hands out, the tailnet one, so links work for friends off the LAN). Saved games are keyed by internal names that stay the same when display names change, so renames don't drop games in progress.
 - **Commands:** `docker logs tidehold` · `curl -s localhost:8200/ping` · rebuild after a change: `cd ~/repos/tidehold && docker compose up -d --build`.
 
+
 ## 4. How traffic flows (the important, non-obvious part)
 
 ### 4.1 This server → internet: through the Pi exit node
