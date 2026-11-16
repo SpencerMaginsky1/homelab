@@ -227,6 +227,7 @@ sudo bash ~/Desktop/Claude/healthcheck/install.sh    # health check + watchdog
 sudo bash ~/Desktop/Claude/updater/install.sh        # updater + rollback (also re-runs the health check installer)
 sudo bash ~/Desktop/Claude/docs-server/install.sh    # docs web server (port 8000, localhost only)
 sudo bash ~/Desktop/Claude/golf-server/install.sh    # GolfApp web server (port 8001) + updater with the 04:00 GitHub pull
+sudo bash ~/Desktop/Claude/samba/install.sh          # Samba: the ~/Desktop/Shared folder for the main PC (README 7)
 sudo install -o root -g root -m 755 ~/Desktop/Claude/mc-backup/mc-backup /usr/local/bin/mc-backup   # mc-backup script only
 sudo bash ~/Desktop/Claude/mc-backup/install.sh      # full mc-backup setup (takes a backup immediately)
 ```
