@@ -363,6 +363,9 @@ tailscale set --exit-node=raspberrypi --exit-node-allow-lan-access=true
 ```
 - **`--exit-node-allow-lan-access=true` is required.** Without it, Tailscale's routing table 52 sends replies to LAN devices into the tunnel. **SSH from the LAN drops instantly.**
 - The setting is saved by Tailscale and survives reboots.
+- **Consequence: when the Pi is unreachable, this server has no outbound internet at all** (nothing falls back to the home connection). Inbound connections (Minecraft), LAN services and the DuckDNS updater keep working, because they use the home connection (4.3). Anything that reaches out stops: the ship tracker's live feed, package and image updates, and name lookups.
+- **Pi outages seen so far** (from Uptime Kuma and the Tailscale log): **2026-11-06 about 08:30 to 08:34** and **2026-11-16 05:37 to 06:22**. Both times the three alerts were one event, in the order Kuma checks them: *Exit Node - Pi Reachable* (the real failure), *Exit Node - Traffic via PI* (no internet, so the lookup of `ifconfig.me` failed), *Ship Tracker* (its `/health` goes 503 when the live feed is disconnected; it recovered 3 minutes after the Pi). The Pi did **not** reboot (36 days of uptime on 2026-11-16), came back on the same WAN IP, and is wired (`eth0`), so the internet at the Pi's location dropped (provider or router there). Not narrowed further: this server has no login on the Pi to read its log.
+- **Under consideration (2026-11-16, not decided):** route only the TV through the Pi and let this server's own traffic use the home connection. See the to-do in section 9.
 
 ### 4.2 LAN devices → this server → Pi → internet (gateway mode)
 This server is a "one-armed" gateway: it has a single NIC, on the same subnet as its clients.
@@ -543,6 +546,12 @@ Leave the policy-routing dispatcher in place unless you also remove whatever nee
 - [x] ~~Install the updated health check (GolfApp check)~~ (done 2026-10-17).
 - [ ] **GolfApp (friend's repo):** course details for courses other than Indian Island (only it is built in; others depend on OpenStreetMap coverage). Ask which courses the owner plays; work on a branch plus pull request (3.12).
 - [x] ~~Uptime Kuma notifications~~ (ntfy on all monitors, 2026-10-15).
+- [ ] **Decide what should go through the Pi (raised 2026-11-16 after the Pi outages in 4.1).** Today the whole server uses the Pi as its exit node and the TV rides on that, so a Pi outage cuts the server's outbound internet. Spencer is **leaning towards TV-only** but wants to look into it more first. Options:
+  1. **TV only:** keep forwarding the TV (and any other LAN client pointed at this gateway) into the tunnel, but send traffic that starts on this server and in its containers out the home connection. A Pi outage would then only affect the TV. Costs: the server's outbound traffic shows the home IP; it is a policy-routing change (needs sudo, test with a second SSH session open, 4.3); the two *Exit Node* Kuma monitors, the health check's "public IP is the Pi's" test and `EXPECTED_EXIT_IP` would need rewriting, because they assume the current design.
+  2. **Keep the current design, add a fallback:** a small watcher that turns the exit node off when the Pi has been unreachable for a few minutes and back on when it returns. Costs: during the fallback the server (and the TV) show the home IP.
+  3. **Leave as is** and accept that short Pi outages take the server's outbound internet with them.
+  - Either way, consider giving this server an SSH key on the Pi (read-only use), so the next outage can be diagnosed from the Pi's own log.
+  - Open question to answer first: was the server itself ever meant to exit from the Pi's location, or was that only ever needed for the TV?
 - [ ] Beszel alerts (Pi offline, high temperature, and so on). Optional, since the health check and Uptime Kuma cover most of this.
 - [ ] When the new drive arrives, add a **second restic copy** of the Minecraft backups there (`restic copy` to a repository on that drive, run nightly), so an SSD failure doesn't take the backups with it.
 - [x] ~~Install the 151 pending package updates~~ (done 2026-10-16; only `gnome-shell` asked for a reboot).
