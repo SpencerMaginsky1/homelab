@@ -31,11 +31,6 @@
       "monitor": "Tidehold"
     },
     {
-      "name": "Job Hunt",
-      "port": 8300,
-      "monitor": "Job Hunt"
-    },
-    {
       "name": "Plex",
       "port": 32400,
       "path": "/web",
