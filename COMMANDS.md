@@ -188,6 +188,8 @@ docker stats --no-stream                            # CPU / RAM per container
 
 **Ship Tracker** (README 3.13) is built locally and the updater doesn't manage it. Refresh it with `cd ~/Desktop/docker/ships && docker compose build --pull && docker compose up -d`. Check the feed with `curl -s localhost:8100/health` and `docker logs ships`. The API key and map area are in `.env`; run `docker compose up -d` after editing it.
 
+**Tidehold** (README 3.15) is built locally, lives in its own private repo and the updater doesn't manage it. After a change: `cd ~/repos/tidehold && docker compose up -d --build`, then `git push` from that folder. Check it with `curl -s localhost:8200/ping` and `docker logs tidehold`.
+
 ## 11. Plex
 ```bash
 snap list plexmediaserver                           # version / revision
