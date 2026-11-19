@@ -169,7 +169,7 @@ Stacks live in `~/Desktop/docker/`.
 
 | Service | Folder | Web UI |
 |---|---|---|
-| Dashboard | `~/Desktop/docker/dashboard` | http://192.168.1.179:7576 |
+| Dashboard | `~/Desktop/docker/dashboard` | http://192.168.1.179:7576 (phone icon: http://spencer-server:7576, works at home and away with Tailscale on) |
 | Uptime Kuma | `~/Desktop/docker/uptime-kuma` | http://192.168.1.179:3001 |
 | Beszel | `~/Desktop/docker/beszel` | http://192.168.1.179:8090 |
 | Dawarich | `~/Desktop/docker` (project `docker`) | http://192.168.1.179:3000 |
