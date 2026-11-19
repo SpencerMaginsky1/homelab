@@ -875,7 +875,7 @@ const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
-const appUrl = (port, path = "") => `${location.protocol}//${location.hostname}:${port}${path}`;
+const appUrl = (port, path = "") => `http://${location.hostname}:${port}${path}`;   // the other apps only speak plain http, even when this page is on https
 
 let S = null;            // last /api/summary
 let current = null;      // { type, key } for the open detail view

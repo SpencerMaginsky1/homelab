@@ -169,7 +169,7 @@ Stacks live in `~/Desktop/docker/`.
 
 | Service | Folder | Web UI |
 |---|---|---|
-| Dashboard | `~/Desktop/docker/dashboard` | http://192.168.1.179:7576 (phone icon: http://spencer-server:7576, works at home and away with Tailscale on) |
+| Dashboard | `~/Desktop/docker/dashboard` | http://192.168.1.179:7576 · **https://spencer-server.tailnet-name.ts.net** (tailnet https via `tailscale serve`, needed for location in the trip planner; phone icon uses this) |
 | Uptime Kuma | `~/Desktop/docker/uptime-kuma` | http://192.168.1.179:3001 |
 | Beszel | `~/Desktop/docker/beszel` | http://192.168.1.179:8090 |
 | Dawarich | `~/Desktop/docker` (project `docker`) | http://192.168.1.179:3000 |
@@ -216,8 +216,9 @@ ssh -L 8000:127.0.0.1:8000 spencer@192.168.1.179    # on your PC, then open http
 systemctl status homelab-golf                       # GolfApp web server (port 8001, starts at boot)
 # GolfApp: open http://192.168.1.179:8001 (LAN) or http://spencer-server:8001 (tailnet) - no tunnel needed
 sudo homelab-updater apply golfapp                  # pull GolfApp from GitHub now (also runs daily at 04:00)
-sudo tailscale serve --bg 8000                      # phone: https://spencer-server.tailnet-name.ts.net/network-diagram.svg
-sudo tailscale serve --https=443 off                # stop sharing to the tailnet
+sudo tailscale serve --bg --https=8443 8000         # phone: https://spencer-server.tailnet-name.ts.net:8443/network-diagram.svg (443 is the dashboard)
+sudo tailscale serve --https=8443 off               # stop sharing the docs (leaves the dashboard on 443)
+tailscale serve status                              # what's shared over https: the dashboard on 443
 ```
 
 ## 14. Reinstalling the homelab tools

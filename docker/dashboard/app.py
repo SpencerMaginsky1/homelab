@@ -1939,7 +1939,9 @@ class Handler(BaseHTTPRequestHandler):
         # a page on another site can open a WebSocket here too (SameSite=Strict already keeps the cookie off
         # it, but check anyway): the Origin has to be this dashboard
         origin = urllib.parse.urlparse(self.headers.get("Origin") or "")
-        if origin.netloc != (self.headers.get("Host") or "") or origin.scheme != "http":
+        same_http = origin.scheme == "http" and origin.netloc == (self.headers.get("Host") or "")
+        via_serve = HTTPS_URL and origin.scheme == "https" and origin.netloc == urllib.parse.urlparse(HTTPS_URL).netloc   # tailscale serve
+        if not (same_http or via_serve):
             return self.send(403, {"error": "Wrong origin."})
         key = self.headers.get("Sec-WebSocket-Key")
         if (self.headers.get("Upgrade") or "").lower() != "websocket" or not key:
