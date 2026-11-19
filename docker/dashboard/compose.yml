@@ -33,6 +33,7 @@ services:
       WEATHER_NAME: Murray Hill, NYC
       TZ: America/New_York
       LOCK_IDLE_MINUTES: "10"          # lock screen comes back after this long with no mouse/keyboard/touch
+      TRAIN_STATIONS: 632,631            # default subway stations on the Trains card/page: 33 St, Grand Central-42 St (station ids from stations.json)
       KASA_HOSTS: 192.168.1.184,192.168.1.185   # Desk Lamp, Couch Lamp (HS103); reserve these IPs in the router
     depends_on: [docker-proxy]
     read_only: true

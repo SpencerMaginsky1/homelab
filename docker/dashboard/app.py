@@ -7,6 +7,7 @@ Reads everything read-only and needs no passwords:
   journal      /var/log/journal via journalctl: health reports, updater, backups, watchdog
   Minecraft    a server-list ping to HOST_IP:MC_PORT
   weather      Open-Meteo (no key)
+  trains       MTA GTFS-realtime subway feeds (no key), decoded by a small built-in protobuf reader
   lights       TP-Link Kasa plugs on the LAN over local KLAP (KASA_USERNAME/PASSWORD in .env; no cloud)
 Serves:
   /                         the page (index.html)
@@ -15,6 +16,8 @@ Serves:
   /api/activity             the last 30 days of events
   /api/minecraft            server status, settings, players, backups
   /api/weather              current conditions, 5-day forecast, next 24 hours
+  /api/trains?s=632,631     next subway arrivals + alerts at up to 4 stations (MTA GTFS-realtime, no key)
+  /api/trains/stations      every station (id, name, lat, lon) + the default ones
   /api/console/log          the Minecraft log from a byte position (needs the console password)
   POST /api/console/login | logout | command   (command goes to the console bridge on the host)
   POST /api/lights          {"id": "<plug id>" | "all", "on": true|false}   switch a light (state is in /api/summary)
@@ -1312,6 +1315,191 @@ def login(ip, password):
 
 # ---------------------------------------------------------------- API
 
+# ---------------------------------------------------------------- NYC subway trains (MTA GTFS-realtime, no key)
+
+MTA_BASE = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/"
+MTA_FEEDS = ["nyct%2Fgtfs", "nyct%2Fgtfs-ace", "nyct%2Fgtfs-bdfm", "nyct%2Fgtfs-g", "nyct%2Fgtfs-jz",
+             "nyct%2Fgtfs-nqrw", "nyct%2Fgtfs-l", "nyct%2Fgtfs-si"]
+MTA_ALERTS = "camsys%2Fsubway-alerts"
+TRAIN_STATIONS = [x for x in os.environ.get("TRAIN_STATIONS", "632,631").split(",") if x.strip()]
+try:
+    with open(os.path.join(HERE, "stations.json")) as _f:
+        STATIONS = {x["id"]: x for x in json.load(_f)}
+except OSError:
+    STATIONS = {}
+
+
+def _pb(buf):
+    """Minimal protobuf reader: yields (field number, value). Value is an int, or bytes for length-delimited fields."""
+    i, n = 0, len(buf)
+    while i < n:
+        key = shift = 0
+        while True:
+            b = buf[i]; i += 1
+            key |= (b & 0x7F) << shift; shift += 7
+            if not b & 0x80:
+                break
+        f, wt = key >> 3, key & 7
+        if wt == 0:
+            v = shift = 0
+            while True:
+                b = buf[i]; i += 1
+                v |= (b & 0x7F) << shift; shift += 7
+                if not b & 0x80:
+                    break
+            yield f, v
+        elif wt == 2:
+            ln = shift = 0
+            while True:
+                b = buf[i]; i += 1
+                ln |= (b & 0x7F) << shift; shift += 7
+                if not b & 0x80:
+                    break
+            yield f, buf[i:i + ln]
+            i += ln
+        elif wt == 1:
+            yield f, int.from_bytes(buf[i:i + 8], "little"); i += 8
+        elif wt == 5:
+            yield f, int.from_bytes(buf[i:i + 4], "little"); i += 4
+        else:
+            raise ValueError(f"unsupported protobuf wire type {wt}")
+
+
+def _mta_get(name):
+    req = urllib.request.Request(MTA_BASE + name, headers={"User-Agent": "homelab-dashboard"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.read()
+
+
+def _parse_trips(buf):
+    trips = []
+    for f, ent in _pb(buf):
+        if f != 2:
+            continue
+        for ef, tu in _pb(ent):
+            if ef != 3:
+                continue
+            route = trip_id = ""
+            stops = []
+            for tf, v in _pb(tu):
+                if tf == 1:
+                    for df, dv in _pb(v):
+                        if df == 1:
+                            trip_id = dv.decode("utf-8", "replace")
+                        elif df == 5:
+                            route = dv.decode("utf-8", "replace")
+                elif tf == 2:
+                    sid, t = "", 0
+                    for sf, sv in _pb(v):
+                        if sf == 4:
+                            sid = sv.decode("utf-8", "replace")
+                        elif sf in (2, 3) and not t:       # arrival, else departure
+                            for ef2, ev in _pb(sv):
+                                if ef2 == 2:
+                                    t = ev
+                    if sid and t:
+                        stops.append((sid, t))
+            if route and stops:
+                trips.append({"id": trip_id, "route": route, "stops": stops})
+    return trips
+
+
+def train_trips():
+    """Every scheduled/running train in the system (all eight feeds, fetched in parallel, cached 20 s)."""
+    def load():
+        results, errs = [], []
+        def one(name):
+            try:
+                results.extend(_parse_trips(_mta_get(name)))
+            except Exception as e:  # noqa: BLE001 - one dead feed shouldn't blank the others
+                errs.append(f"{name}: {e}")
+        threads = [threading.Thread(target=one, args=(n,)) for n in MTA_FEEDS]
+        [t.start() for t in threads]
+        [t.join(20) for t in threads]
+        if not results:
+            raise RuntimeError("no MTA feed answered: " + "; ".join(errs))
+        return {"trips": results, "failed": len(errs), "at": int(time.time())}
+    return cached("train-trips", 20, load)
+
+
+def train_alerts():
+    def load():
+        out = []
+        for f, ent in _pb(_mta_get(MTA_ALERTS)):
+            if f != 2:
+                continue
+            for ef, al in _pb(ent):
+                if ef != 5:
+                    continue
+                routes, stops, header, desc, periods = set(), set(), "", "", []
+                for af, v in _pb(al):
+                    if af == 1:
+                        a = b = 0
+                        for pf, pv in _pb(v):
+                            if pf == 1: a = pv
+                            elif pf == 2: b = pv
+                        periods.append((a, b))
+                    elif af == 5:
+                        for sf, sv in _pb(v):
+                            if sf == 2: routes.add(sv.decode())
+                            elif sf == 5: stops.add(sv.decode())
+                    elif af in (10, 11):
+                        for tf, tv in _pb(v):
+                            if tf == 1:
+                                txt = ""
+                                for xf, xv in _pb(tv):
+                                    if xf == 1: txt = xv.decode("utf-8", "replace")
+                                if af == 10 and not header: header = txt
+                                elif af == 11 and not desc: desc = txt
+                now = time.time()
+                if periods and not any((a == 0 or a <= now) and (b == 0 or b >= now) for a, b in periods):
+                    continue                                   # scheduled for later (or already over)
+                if header:
+                    clean = lambda x: re.sub(r"\[([A-Z0-9]+)\]", r"\1", x)
+                    out.append({"routes": sorted(routes), "stops": sorted(stops), "header": clean(header), "desc": clean(desc)})
+        return out
+    return cached("train-alerts", 60, load)
+
+
+def station_name(stop_id):
+    s = STATIONS.get(stop_id[:-1] if stop_id[-1:] in "NS" else stop_id)
+    return s["name"] if s else stop_id
+
+
+def trains_at(ids):
+    data = train_trips()
+    now = time.time()
+    try:
+        alerts = train_alerts()
+    except Exception as e:  # noqa: BLE001
+        log(f"train alerts: {e}")
+        alerts = []
+    stations = []
+    for sid in ids:
+        st = STATIONS.get(sid)
+        if not st:
+            continue
+        dirs = {"N": [], "S": []}
+        routes = set()
+        for tr in data["trips"]:
+            for i, (stop, t) in enumerate(tr["stops"]):
+                if stop[:-1] == sid and stop[-1] in dirs and now - 30 <= t <= now + 3600:
+                    dirs[stop[-1]].append({"route": tr["route"], "t": t * 1000, "to": station_name(tr["stops"][-1][0]), "trip": tr["id"]})
+                    routes.add(tr["route"])
+        for d in dirs.values():
+            d.sort(key=lambda a: a["t"])
+        mine = [a for a in alerts if routes & set(a["routes"]) or any(x[:-1] == sid or x == sid for x in a["stops"])]
+        stations.append({"id": sid, "name": st["name"], "lat": st["lat"], "lon": st["lon"], "routes": sorted(routes),
+                         "north": dirs["N"][:8], "south": dirs["S"][:8], "alerts": mine[:6]})
+    return {"now": int(now * 1000), "feed_at": data["at"] * 1000, "feeds_down": data["failed"], "stations": stations}
+
+
+def trains_page(qs):
+    ids = [x for x in (qs.get("s", [""])[0] or ",".join(TRAIN_STATIONS)).split(",") if x in STATIONS][:4]
+    return trains_at(ids)
+
+
+
 def section(errors, name, fn, default=None):
     try:
         return fn()
@@ -1569,6 +1757,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, activity_page())
             if p == "/api/weather":
                 return self.send(200, forecast())
+            if p == "/api/trains":
+                return self.send(200, trains_page(urllib.parse.parse_qs(u.query)))
+            if p == "/api/trains/stations":
+                return self.send(200, {"default": TRAIN_STATIONS, "stations": list(STATIONS.values())})
             if p == "/api/terminal":
                 return self.send(200, terminal_status(self.cookie("dashsess")))
             if p == "/api/terminal/ws":
