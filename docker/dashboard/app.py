@@ -1728,7 +1728,8 @@ def _csa(data, origin, dest, now, exclude):
         tr = trips[on[4]]
         legs.append({"type": "ride", "route": tr["route"], "dir": tr["stops"][0][0][-1:], "headsign": station_name(tr["stops"][-1][0]),
                      "from": station_name(on[2]), "to": station_name(off[3]), "from_id": STOP2CX.get(on[2]), "to_id": STOP2CX.get(off[3]),
-                     "dep": int(on[0] * 1000), "arr": int(off[1] * 1000), "stops": off[5] - on[5] + 1})
+                     "dep": int(on[0] * 1000), "arr": int(off[1] * 1000), "stops": off[5] - on[5] + 1,
+                     "_via": [STOP2CX.get(sid[:-1], sid[:-1]) for sid, _ in tr["stops"][on[5]:off[5] + 2]]})
         first_trip = on[4]
         how = ready_how[on[2]]
         if how[0] == "start":
@@ -1738,6 +1739,28 @@ def _csa(data, origin, dest, now, exclude):
         legs.append({"type": "transfer", "min": round(how[2]), "at": station_name(prev), "to": station_name(on[2]), "walk": prev != on[2]})
         st = prev
     legs.reverse()
+    # The scan boards a train at the first station where you could catch it. If that same train also stops at
+    # another station near the start, board it wherever you can leave latest (and on a tie, walk least):
+    # don't walk 13 min north to 42 St for a D that comes down to 34 St two minutes later.
+    if legs[0]["type"] == "walk" and legs[0].get("start") and legs[1]["type"] == "ride":
+        ride, walk_from = legs[1], dict(origin)
+        tr = trips[first_trip]
+        k0 = next(k for k, (sid, t) in enumerate(tr["stops"]) if int(t * 1000) == ride["dep"] and station_name(sid) == ride["from"])
+        k_off = k0 + ride["stops"] - 1
+        best_k, best_key = k0, None
+        for k in range(k0, k_off):
+            sid, t = tr["stops"][k]
+            w = walk_from.get(sid[:-1])
+            if w is None:
+                continue
+            key = (t - w * 60, -w)                      # leave latest, then walk least
+            if best_key is None or key > best_key:
+                best_k, best_key = k, key
+        if best_k != k0:
+            sid, t = tr["stops"][best_k]
+            ride.update({"from": station_name(sid), "from_id": STOP2CX.get(sid[:-1]), "dep": int(t * 1000), "stops": k_off - best_k + 1,
+                         "_via": [STOP2CX.get(x[:-1], x[:-1]) for x, _ in tr["stops"][best_k:k_off + 2]]})
+            legs[0].update({"min": round(walk_from[sid[:-1]]), "to": station_name(sid)})
     first_dep = next(l["dep"] for l in legs if l["type"] == "ride")
     leave = first_dep - legs[0]["min"] * 60000 if legs[0]["type"] == "walk" else first_dep
     return {"legs": legs, "arrive": int(best * 1000), "leave": int(leave), "first_trip": first_trip}
@@ -1756,14 +1779,36 @@ def trip_plan(qs):
     for sid, w in dest_list:
         dest[sid] = min(w, dest.get(sid, 99))
     data = train_connections()
-    opts, exclude = [], set()
-    for _ in range(3):                                  # the fastest trip, then the best ones starting on a different train
+    # The fastest trip, then the next-best ones that start on a different train. The same route a few minutes later
+    # isn't a real alternative: it's folded into the first one as "also at 5:50, 5:58".
+    opts, exclude, by_route = [], set(), {}
+    for _ in range(8):
         o = _csa(data, origin, dest, now, exclude)
         if not o:
             break
         exclude.add(o.pop("first_trip"))
-        if all(o["legs"] != p["legs"] for p in opts):
+        seen, loops = set(), False                     # a trip that rides back through a station it already passed
+        for l in (l for l in o["legs"] if l["type"] == "ride"):
+            via = l.pop("_via")
+            if seen & set(via[1:]):
+                loops = True
+            seen |= set(via)
+        if loops:
+            continue
+        sig = tuple((l["from_id"], l["to_id"]) for l in o["legs"] if l["type"] == "ride")   # same stations = same trip, 4 or 5 alike
+        if sig in by_route:
+            later = by_route[sig].setdefault("later", [])
+            first = next(l for l in o["legs"] if l["type"] == "ride")
+            if len(later) < 2:
+                later.append({"dep": first["dep"], "route": first["route"], "leave": o["leave"], "arrive": o["arrive"]})
+        elif len(opts) < 3:
+            walked = lambda x: sum(l["min"] for l in x["legs"] if l["type"] in ("walk", "transfer") and (l["type"] == "walk" or l.get("walk")))
+            if opts and (o["arrive"] - opts[0]["arrive"] > 15 * 60000 or walked(o) > walked(opts[0]) + 8):
+                continue                                # much later, or a lot more walking for no gain: not worth showing
+            by_route[sig] = o
             opts.append(o)
+        if len(opts) >= 3 and all(len(o2.get("later", [])) >= 2 for o2 in opts[:1]):
+            break
     walk = _walk_min(_m(o_pt[0], o_pt[1], d_pt[0], d_pt[1]))
     return {"now": int(now * 1000), "options": opts, "walk_min": round(walk),
             "note": None if opts else "No train gets there within the time the live feeds cover (about the next hour)."}

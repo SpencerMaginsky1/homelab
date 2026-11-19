@@ -594,6 +594,7 @@ a.rainrow:hover strong { color: var(--accent); }
 .tpsum .arr { font-weight: 600; }
 .tpsum .lv { color: var(--muted); font-size: 13px; }
 .tpsum .lv.now { color: var(--ok); font-weight: 600; }
+.tplater { margin-left: 4px; }
 .tpchain { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 6px 0 2px; color: var(--muted); font-size: 12px; }
 .tplegs { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 7px; font-size: 13.5px; }
 .tplegs li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; align-items: start; }
@@ -1894,7 +1895,7 @@ function tpRender(r) {
     return `<div class="tpopt${i === 0 ? " best" : ""}">
       <div class="tpsum"><span class="tot">${tot} min</span><span class="arr">arrive ${fmtClock(o.arrive)}</span>
         <span class="lv${lv <= 1 ? " now" : ""}">${lv <= 0 ? "leave now" : `leave in ${lv} min`}</span></div>
-      <div class="tpchain">${chain}</div>
+      <div class="tpchain">${chain}${(o.later || []).length ? `<span class="tplater">· also ${o.later.map((x) => `${x.route !== rides[0].route ? rtBadge(x.route) + " " : ""}${fmtClock(x.dep)}`).join(", ")}</span>` : ""}</div>
       ${i === 0 ? `<ul class="tplegs">${legs}</ul>` : `<details><summary>Steps (first train ${fmtClock(rides[0].dep)})</summary><ul class="tplegs">${legs}</ul></details>`}
     </div>`;
   }).join("");
