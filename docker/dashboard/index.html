@@ -567,6 +567,15 @@ a.rainrow:hover strong { color: var(--accent); }
 @media (max-width: 700px) { .trmap { height: 62vh; } }
 .trmap .ln { fill: none; stroke-linecap: round; stroke-linejoin: round; opacity: .85; stroke-width: 2px; vector-effect: non-scaling-stroke; }
 .trmap image { pointer-events: none; }
+/* the gray lines (S shuttles, L) vanish on the gray basemap: draw them darker on the light map, lighter on the dark one,
+   and give every line a thin outline so it stands off the streets */
+.trmap { --map-s: #4a4e53; --map-l: #6f7378; --map-case: rgba(255,255,255,.95); }
+@media (prefers-color-scheme: dark) { .trmap { --map-s: #c3c6c9; --map-l: #d9dbdd; --map-case: rgba(0,0,0,.75); } }
+.trmap .ln.lc { stroke: var(--map-case); stroke-width: 4.5px; opacity: 1; }
+.trmap .ln:not(.lc)[data-g="S"] { stroke: var(--map-s); }
+.trmap .ln:not(.lc)[data-g="L"] { stroke: var(--map-l); }
+.trmap .tg[data-g="S"] circle { fill: var(--map-s); }
+.trmap .tg[data-g="L"] circle { fill: var(--map-l); }
 .trattr { position: absolute; left: 8px; bottom: 6px; font-size: 10px; color: #444; background: rgba(255,255,255,.75); padding: 1px 5px; border-radius: 4px; }
 .trattr a { color: inherit; }
 .trmap .tg { transition: transform 14s linear; }
@@ -1731,7 +1740,8 @@ async function trMapInit(d) {
   $("tr-stations").innerHTML = order.map((x) => `<g class="sn${TRM.home.includes(x.id) ? " home" : ""}" data-id="${esc(x.id)}"><circle class="hit" r="11"/>${GL}</g>`).join("");
   TRM.sn = [...$("tr-stations").children].map((g) => { const x = st[g.dataset.id]; return { g, s: x, x: px(x.lon), y: py(x.lat) }; });
   TRM.u = null;
-  $("tr-lines").innerHTML = Object.entries(paths).map(([g, d2]) => `<path class="ln" data-g="${g}" stroke="${TR_GCOL[g]}" d="${d2.join("")}"/>`).join("");
+  $("tr-lines").innerHTML = Object.entries(paths).map(([g, d2]) => `<path class="ln lc" data-g="${g}" d="${d2.join("")}"/>`).join("")
+    + Object.entries(paths).map(([g, d2]) => `<path class="ln" data-g="${g}" stroke="${TR_GCOL[g]}" d="${d2.join("")}"/>`).join("");
   const c = homes[0] ? [px(homes[0].lon), py(homes[0].lat)] : [px(-73.98), py(40.75)];
   TRM.view = { cx: c[0], cy: c[1], w: 240 };
   trApplyView(true);
