@@ -565,6 +565,47 @@ a.rainrow:hover strong { color: var(--accent); }
 .trmapwrap { position: relative; margin-bottom: 18px; }
 .trmap { width: 100%; height: 520px; display: block; background: var(--sunk); border-radius: 10px; touch-action: none; cursor: grab; user-select: none; }
 .trmine { margin: 0 0 8px; font-size: 15px; }
+/* trip planner */
+.trplan { margin-bottom: 18px; }
+.tpgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.tpf { position: relative; min-width: 0; }
+.tpf label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+.tpin { display: flex; gap: 6px; }
+.tpf input { flex: 1; min-width: 0; width: 100%; padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--sunk); color: var(--fg); font: inherit; font-size: 16px; }  /* 16px: iOS won't zoom the page on focus */
+.tploc { flex: none; width: 44px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--accent); cursor: pointer; display: grid; place-items: center; touch-action: manipulation; }
+.tploc svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.tploc.busy { opacity: .5; }
+.tpgo { padding: 11px 18px; border-radius: 9px; border: 0; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; touch-action: manipulation; }
+.tpgo:disabled { opacity: .45; cursor: default; }
+.tpsug { position: absolute; left: 0; right: 0; top: 100%; margin-top: 4px; z-index: 30; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.18); overflow: hidden; }
+.tpsug button { display: flex; gap: 8px; align-items: center; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--line); background: none; color: var(--fg); font: inherit; padding: 10px 11px; cursor: pointer; }
+.tpsug button:first-child { border-top: 0; }
+.tpsug button:hover, .tpsug button:focus { background: var(--accent-soft); }
+.tpsug .k { font-size: 11px; color: var(--muted); margin-left: auto; flex: none; }
+.tpsug .wait { padding: 9px 11px; font-size: 12.5px; color: var(--muted); }
+.tprecent { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tprecent button { border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 999px; padding: 4px 10px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.tpnote { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+.tpout { display: grid; gap: 10px; margin-top: 12px; }
+.tpopt { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--surface); }
+.tpopt.best { border-color: var(--accent); }
+.tpsum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.tpsum .tot { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tpsum .arr { font-weight: 600; }
+.tpsum .lv { color: var(--muted); font-size: 13px; }
+.tpsum .lv.now { color: var(--ok); font-weight: 600; }
+.tpchain { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 6px 0 2px; color: var(--muted); font-size: 12px; }
+.tplegs { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 7px; font-size: 13.5px; }
+.tplegs li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; align-items: start; }
+.tplegs .ic { display: grid; place-items: center; height: 24px; color: var(--muted); }
+.tplegs .ic svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tplegs .sub { display: block; color: var(--muted); font-size: 12.5px; }
+.tpopt details summary { cursor: pointer; font-size: 12.5px; color: var(--accent); margin-top: 4px; }
+@media (max-width: 700px) {
+  .tpgrid { grid-template-columns: 1fr; gap: 8px; }
+  .tpgo { width: 100%; }
+  .trplan { padding: 12px; }
+}
 .trzoom button, .trfilters button, .trpop button { touch-action: manipulation; }
 @media (max-width: 700px) {
   .trhead .note { display: none; }                       /* the map is the point on a phone: get it on screen */
@@ -1642,7 +1683,8 @@ const trSaved = () => { try { const v = JSON.parse(store.get("trainStations") ||
 const trPath = () => { const v = trSaved(); return "/api/trains" + (v ? `?s=${encodeURIComponent(v.join(","))}` : ""); };
 let TR_ALL = null;   // every station complex, fetched once (search box + map icons)
 let TR_STOPS = null; // platform-group id -> [lat, lon], for drawing the lines
-const trLoadStations = () => TR_ALL ? Promise.resolve() : api("/api/trains/stations").then((x) => { TR_ALL = x.stations; TR_STOPS = x.stops; });
+let TR_HTTPS = "";   // the dashboard's https address (location only works there)
+const trLoadStations = () => TR_ALL ? Promise.resolve() : api("/api/trains/stations").then((x) => { TR_ALL = x.stations; TR_STOPS = x.stops; TR_HTTPS = x.https_url || ""; });
 const trMin = (t) => { const m = Math.round((t - Date.now()) / 60000); return m <= 0 ? "Now" : `${m} min`; };
 // d = "N"|"S" (which column), head = that column's heading; a train whose own direction name differs gets a small tag
 const trRows = (list, n, d, head) => list.slice(0, n).map((a) => { const own = d ? trDir(a.route, d) : head;
@@ -1680,6 +1722,7 @@ function renderTrains(d, quiet) {
   if (!quiet || !$("tr-list")) {
     $("view-detail").innerHTML = `${crumb}
       <div class="dhead trhead"><div><h2>Trains</h2><p class="note">Live MTA subway arrivals. Updates about every 30 seconds.</p></div></div>
+      <section class="panel trplan" id="tp"></section>
       <section class="panel trmapwrap"><div class="panel-head"><h2>Live map</h2><span class="meta" id="tr-map-meta"></span></div>
         <div class="trfilters" id="tr-filters" role="group" aria-label="Show lines"></div>
         <div style="position:relative"><div class="trpop" id="tr-pop" hidden></div><svg class="trmap" id="tr-map" role="img" aria-label="Live map of subway trains"></svg>
@@ -1689,6 +1732,7 @@ function renderTrains(d, quiet) {
       <h3 class="trmine">My stations</h3>
       <div class="trmanage"><div id="tr-chips"></div><input id="tr-search" type="search" placeholder="Add a station (e.g. 33 St, Times Sq)" autocomplete="off"><div class="trresults" id="tr-results" hidden></div></div>
       <div id="tr-list"></div>`;
+    tpInit();
     trMapInit(d);
   }
   $("tr-chips").innerHTML = trChips(d);
@@ -1717,6 +1761,165 @@ document.addEventListener("click", (e) => {
   const cur = (detail && detail.stations ? detail.stations.map((x) => x.id) : []);
   if (add) trSetStations([...cur.filter((i) => i !== add.dataset.tradd), add.dataset.tradd]);
   else trSetStations(cur.filter((i) => i !== del.dataset.trdel));
+});
+
+/* trip planner */
+const TP = { from: null, to: null, sug: {}, gseq: 0, gtimer: null, pseq: 0 };
+const WALK_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="M10 21l2-6 3 3v3M9 12l2-4 4 2 2 3M11 8l-3 3v3"/></svg>`;
+const XFER_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>`;
+const fmtClock = (ms) => new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const tpRecent = () => { try { return JSON.parse(store.get("tripRecent") || "[]").slice(0, 5); } catch { return []; } };
+
+function tpInit() {
+  const p = $("tp");
+  if (!p) return;
+  p.innerHTML = `<div class="panel-head"><h2>Plan a trip</h2><span class="meta">Fastest train on live times</span></div>
+    <div class="tpgrid">
+      <div class="tpf"><label for="tp-from">From</label><div class="tpin"><input id="tp-from" type="search" placeholder="Address, place or station" autocomplete="off" enterkeyhint="next">
+        <button type="button" class="tploc" id="tp-loc" title="Use my location" aria-label="Use my location"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/><circle cx="12" cy="12" r="7.5"/></svg></button></div>
+        <div class="tpsug" id="tp-from-sug" hidden></div></div>
+      <div class="tpf"><label for="tp-to">To</label><div class="tpin"><input id="tp-to" type="search" placeholder="Where are you going?" autocomplete="off" enterkeyhint="go"></div>
+        <div class="tpsug" id="tp-to-sug" hidden></div></div>
+      <button type="button" class="tpgo" id="tp-go">Find trains</button>
+    </div>
+    <div class="tprecent" id="tp-recent"></div>
+    <p class="tpnote" id="tp-note" hidden></p>
+    <div class="tpout" id="tp-out"></div>`;
+  if (TP.from) $("tp-from").value = TP.from.kind === "here" ? "📍 My location" : TP.from.label;
+  if (TP.to) $("tp-to").value = TP.to.label;
+  tpRecentChips();
+  if (TP.last) tpRender(TP.last);
+  // phone that already allowed location for this site: fill "From" without asking
+  if (!TP.from && window.isSecureContext && navigator.permissions) navigator.permissions.query({ name: "geolocation" }).then((r) => { if (r.state === "granted") tpLocate(true); }).catch(() => {});
+}
+
+function tpRecentChips() {
+  const el = $("tp-recent");
+  if (!el) return;
+  const r = tpRecent();
+  el.innerHTML = r.length ? `<span class="tpnote" style="margin:0">Recent:</span>` + r.map((x, i) => `<button type="button" data-tprecent="${i}">${esc(x.label)}</button>`).join("") : "";
+}
+
+function tpNote(html) { const n = $("tp-note"); if (n) { n.hidden = !html; n.innerHTML = html || ""; } }
+
+function tpLocate(auto) {
+  if (!window.isSecureContext || !navigator.geolocation) {
+    if (!auto) tpNote(TR_HTTPS ? `Your browser only shares location with secure pages. Open <a href="${esc(TR_HTTPS)}/#trains">${esc(TR_HTTPS.replace(/^https:\/\//, ""))}</a> (and re-add it to your home screen), or type where you are.`
+      : "Your browser only shares location with secure (https) pages. Type where you are instead.");
+    return;
+  }
+  const btn = $("tp-loc");
+  btn && btn.classList.add("busy");
+  navigator.geolocation.getCurrentPosition((pos) => {
+    btn && btn.classList.remove("busy");
+    TP.from = { kind: "here", label: "My location", lat: pos.coords.latitude, lon: pos.coords.longitude };
+    if ($("tp-from")) $("tp-from").value = "📍 My location";
+    tpNote(pos.coords.accuracy > 300 ? `Location is rough (±${Math.round(pos.coords.accuracy)} m).` : "");
+    if (TP.to) tpPlan();
+  }, (err) => {
+    btn && btn.classList.remove("busy");
+    if (!auto) tpNote(err.code === 1 ? "Location is blocked for this site. Allow it in Settings → Safari → Location, or type where you are." : "Couldn't get your location. Type where you are instead.");
+  }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+}
+
+function tpSugRender(which) {
+  const box = $(`tp-${which}-sug`), s = TP.sug[which];
+  if (!box || !s) return;
+  const items = [...s.stations, ...s.places];
+  box.innerHTML = items.map((x, i) => `<button type="button" data-tpw="${which}" data-tpi="${i}">${x.kind === "station" ? rtBadge((x.routes || [])[0] || "S") : WALK_SVG.replace("<svg", '<svg width="16" height="16" style="fill:none;stroke:currentColor;stroke-width:2"')}<span>${esc(x.label)}</span><span class="k">${x.kind === "station" ? "station" : "place"}</span></button>`).join("")
+    + (s.loading ? `<div class="wait">Looking up places…</div>` : !items.length ? `<div class="wait">No matches. Try a street address.</div>` : "");
+  box.hidden = false;
+}
+
+function tpSuggest(which, q) {
+  const ql = q.trim().toLowerCase(), box = $(`tp-${which}-sug`);
+  TP[which] = null;
+  if (ql.length < 2) { box.hidden = true; return; }
+  const stations = (TR_ALL || []).filter((x) => x.name.toLowerCase().includes(ql))
+    .sort((a, b) => a.name.toLowerCase().indexOf(ql) - b.name.toLowerCase().indexOf(ql) || a.name.length - b.name.length)
+    .slice(0, 4).map((x) => ({ kind: "station", label: x.name, id: x.id, lat: x.lat, lon: x.lon, routes: x.routes }));
+  TP.sug[which] = { stations, places: [], loading: ql.length >= 3 };
+  tpSugRender(which);
+  clearTimeout(TP.gtimer);
+  if (ql.length < 3) return;
+  const seq = ++TP.gseq;
+  TP.gtimer = setTimeout(() => api(`/api/trains/geocode?q=${encodeURIComponent(q.trim())}`).then((r) => {
+    if (seq !== TP.gseq || !TP.sug[which]) return;
+    TP.sug[which].places = r.results.slice(0, 4).map((x) => ({ kind: "place", label: x.name, lat: x.lat, lon: x.lon }));
+    TP.sug[which].loading = false; tpSugRender(which);
+  }).catch(() => { if (TP.sug[which]) { TP.sug[which].loading = false; tpSugRender(which); } }), 450);
+}
+
+function tpPick(which, x) {
+  TP[which] = x;
+  $(`tp-${which}`).value = x.label;
+  $(`tp-${which}-sug`).hidden = true;
+  if (which === "to") {
+    const r = tpRecent().filter((y) => y.label !== x.label);
+    store.set("tripRecent", JSON.stringify([{ kind: x.kind, label: x.label, id: x.id, lat: x.lat, lon: x.lon }, ...r].slice(0, 5)));
+    tpRecentChips();
+  }
+  if (TP.from && TP.to) tpPlan();
+  else if (which === "from") $("tp-to").focus();
+}
+
+const tpSpec = (x) => (x.kind === "station" && x.id ? x.id : `${x.lat.toFixed(6)},${x.lon.toFixed(6)}`);
+
+async function tpPlan() {
+  if (!TP.from || !TP.to) { tpNote(!TP.from ? "Pick where you're starting (or tap the location button)." : "Pick where you're going."); return; }
+  tpNote("");
+  const seq = ++TP.pseq;
+  $("tp-out").innerHTML = `<p class="loading">Finding the fastest trains…</p>`;
+  try {
+    const r = await api(`/api/trains/plan?from=${encodeURIComponent(tpSpec(TP.from))}&to=${encodeURIComponent(tpSpec(TP.to))}`);
+    if (seq !== TP.pseq || !$("tp-out")) return;
+    TP.last = r; tpRender(r);
+  } catch (e) { if ($("tp-out")) $("tp-out").innerHTML = `<p class="empty">Couldn't plan that: ${esc(e.message)}</p>`; }
+}
+
+function tpRender(r) {
+  const out = $("tp-out");
+  if (!out) return;
+  if (r.error && !(r.options || []).length) { out.innerHTML = `<p class="empty">${esc(r.error)}</p>`; return; }
+  const now = Date.now();
+  const opts = (r.options || []).map((o, i) => {
+    const tot = Math.max(1, Math.round((o.arrive - now) / 60000)), lv = Math.round((o.leave - now) / 60000);
+    const rides = o.legs.filter((l) => l.type === "ride");
+    const chain = o.legs.map((l) => l.type === "ride" ? rtBadge(l.route) : l.type === "walk" && l.min ? `<span>${WALK_SVG.replace("<svg", '<svg width="13" height="13" style="fill:none;stroke:currentColor;stroke-width:2"')}${l.min}</span>` : "").filter(Boolean).join("<span>›</span>");
+    const legs = o.legs.map((l) => {
+      if (l.type === "walk") return l.min ? `<li><span class="ic">${WALK_SVG}</span><span>Walk ${l.min} min ${l.start ? `to <strong>${esc(l.to)}</strong>` : "to your destination"}</span></li>` : "";
+      if (l.type === "transfer") return `<li><span class="ic">${XFER_SVG}</span><span>${l.walk ? `Walk to <strong>${esc(l.to)}</strong>` : `Change trains at <strong>${esc(l.to)}</strong>`}<span class="sub">allow ${l.min} min</span></span></li>`;
+      return `<li><span class="ic">${rtBadge(l.route)}</span><span><strong>${esc(l.from)}</strong> ${fmtClock(l.dep)} → <strong>${esc(l.to)}</strong> ${fmtClock(l.arr)}<span class="sub">${esc(trDir(l.route, l.dir))} to ${esc(l.headsign)} · ${l.stops - 1} stop${l.stops - 1 === 1 ? "" : "s"}</span></span></li>`;
+    }).join("");
+    return `<div class="tpopt${i === 0 ? " best" : ""}">
+      <div class="tpsum"><span class="tot">${tot} min</span><span class="arr">arrive ${fmtClock(o.arrive)}</span>
+        <span class="lv${lv <= 1 ? " now" : ""}">${lv <= 0 ? "leave now" : `leave in ${lv} min`}</span></div>
+      <div class="tpchain">${chain}</div>
+      ${i === 0 ? `<ul class="tplegs">${legs}</ul>` : `<details><summary>Steps (first train ${fmtClock(rides[0].dep)})</summary><ul class="tplegs">${legs}</ul></details>`}
+    </div>`;
+  }).join("");
+  const walk = r.walk_min && (!r.options.length || r.walk_min <= Math.round((r.options[0].arrive - now) / 60000)) ? `<p class="tpnote">Walking all the way is about ${r.walk_min} min${r.options.length ? ", as fast as the train" : ""}.</p>` : "";
+  out.innerHTML = opts + walk + (r.note ? `<p class="empty">${esc(r.note)}</p>` : "") + (opts ? `<p class="tpnote">Times are the MTA's live predictions; walking is estimated at about 3 mph.</p>` : "");
+}
+
+document.addEventListener("input", (e) => {
+  if (e.target.id === "tp-from" || e.target.id === "tp-to") tpSuggest(e.target.id.slice(3), e.target.value);
+});
+document.addEventListener("keydown", (e) => {
+  if ((e.target.id === "tp-from" || e.target.id === "tp-to") && e.key === "Enter") {
+    const w = e.target.id.slice(3), s = TP.sug[w], first = s && [...s.stations, ...s.places][0];
+    if (!TP[w] && first) tpPick(w, first); else if (TP.from && TP.to) tpPlan();
+    e.preventDefault();
+  }
+});
+document.addEventListener("click", (e) => {
+  const it = e.target.closest("[data-tpw]");
+  if (it) { const s = TP.sug[it.dataset.tpw]; tpPick(it.dataset.tpw, [...s.stations, ...s.places][+it.dataset.tpi]); return; }
+  const rc = e.target.closest("[data-tprecent]");
+  if (rc) { tpPick("to", tpRecent()[+rc.dataset.tprecent]); return; }
+  if (e.target.closest("#tp-loc")) { tpLocate(false); return; }
+  if (e.target.closest("#tp-go")) { tpPlan(); return; }
+  if (!e.target.closest(".tpf")) document.querySelectorAll(".tpsug").forEach((b) => { b.hidden = true; });
 });
 
 /* live map */
