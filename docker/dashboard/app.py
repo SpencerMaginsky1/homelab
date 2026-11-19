@@ -1518,6 +1518,15 @@ except OSError:
     NETWORK = {"edges": [], "pred": {}}
 
 
+STATION_ROUTES = {}
+for _r, _dirs in NETWORK["pred"].items():
+    for _m in _dirs.values():
+        for _b, _a in _m.items():
+            STATION_ROUTES.setdefault(_b, set()).add(_r)
+            STATION_ROUTES.setdefault(_a, set()).add(_r)
+STATION_ROUTES = {k: sorted(v, key=lambda r: (r.rstrip("X"), r)) for k, v in STATION_ROUTES.items()}
+
+
 def _km(a, b):
     dy = (a["lat"] - b["lat"]) * 111.0
     dx = (a["lon"] - b["lon"]) * 84.0
@@ -1837,7 +1846,7 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/trains/network":
                 return self.send(200, {"edges": NETWORK["edges"]})
             if p == "/api/trains/stations":
-                return self.send(200, {"default": TRAIN_STATIONS, "stations": list(STATIONS.values())})
+                return self.send(200, {"default": TRAIN_STATIONS, "stations": [dict(x, routes=STATION_ROUTES.get(x["id"], [])) for x in STATIONS.values()]})
             if p == "/api/terminal":
                 return self.send(200, terminal_status(self.cookie("dashsess")))
             if p == "/api/terminal/ws":

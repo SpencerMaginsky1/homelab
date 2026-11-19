@@ -570,7 +570,16 @@ a.rainrow:hover strong { color: var(--accent); }
 .trmap .tg { transition: transform 14s linear; }
 .trmap .tg circle { stroke: var(--surface); vector-effect: non-scaling-stroke; stroke-width: 1px; cursor: pointer; }
 .trmap .tg.sel circle { stroke: var(--fg); stroke-width: 2px; }
-.trmap .st circle { fill: rgba(255,255,255,.01); stroke: var(--fg); stroke-width: 2px; vector-effect: non-scaling-stroke; cursor: pointer; }
+.trmap .sn { cursor: pointer; }
+.trmap .sn .hit { fill: transparent; stroke: none; }
+.trmap .sn .bg { fill: var(--surface); stroke: var(--fg); stroke-width: 1.2px; vector-effect: non-scaling-stroke; }
+.trmap .sn .gl { fill: var(--fg); stroke: none; }
+.trmap .sn .gw { fill: var(--surface); }
+.trmap .sn .gf { fill: none; stroke: var(--fg); stroke-width: 1px; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+.trmap .sn.home .bg { stroke: var(--accent); stroke-width: 2.5px; }
+.trmap .sn.sel .bg { stroke: var(--accent); stroke-width: 3px; fill: var(--accent-soft); }
+.trmap .lb { fill: #111; stroke: rgba(255,255,255,.92); stroke-linejoin: round; paint-order: stroke; font-weight: 600; pointer-events: none; }
+@media (prefers-color-scheme: dark) { .trmap .lb { fill: #eef2f6; stroke: rgba(0,0,0,.75); } }
 .trzoom { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .trzoom button { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); font-size: 18px; cursor: pointer; }
 .trfilters { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
@@ -1610,7 +1619,7 @@ function renderTrains(d, quiet) {
         <div style="position:relative"><svg class="trmap" id="tr-map" role="img" aria-label="Live map of subway trains"></svg>
           <span class="trattr">Map © <a href="https://www.esri.com" target="_blank" rel="noopener">Esri</a>, HERE, Garmin, OpenStreetMap contributors</span>
           <div class="trzoom"><button type="button" id="tr-zin" aria-label="Zoom in">+</button><button type="button" id="tr-zout" aria-label="Zoom out">−</button></div></div>
-        <p class="trinfo note" id="tr-info">Tap a train or a ringed station. Positions are estimated from the MTA's arrival times, so they are approximate.</p></section>
+        <p class="trinfo note" id="tr-info">Tap a train or a station. Positions are estimated from the MTA's arrival times, so they are approximate.</p></section>
       <div id="tr-list"></div>`;
     trMapInit(d);
   }
@@ -1669,7 +1678,12 @@ async function trMapInit(d) {
   const paths = {};
   for (const [a, b, g] of TRM.net.edges) { if (st[a] && st[b]) (paths[g] ||= []).push(`M${px(st[a].lon).toFixed(1)} ${py(st[a].lat).toFixed(1)}L${px(st[b].lon).toFixed(1)} ${py(st[b].lat).toFixed(1)}`); }
   const homes = TRM.home.map((id) => st[id]).filter(Boolean);
-  svg.innerHTML = `<g id="tr-tiles"></g><g id="tr-lines"></g><g id="tr-homes">${homes.map((h) => `<g class="st" data-name="${esc(h.name)}"><circle cx="${px(h.lon)}" cy="${py(h.lat)}" r="5"/></g>`).join("")}</g><g id="tr-trains"></g>`;
+  svg.innerHTML = `<g id="tr-tiles"></g><g id="tr-lines"></g><g id="tr-stations"></g><g id="tr-labels"></g><g id="tr-trains"></g>`;
+  const GL = `<rect class="bg" x="-6" y="-6" width="12" height="12" rx="3"/><path class="gl" d="M-3.5-3.2h7v5.4h-7z"/><rect class="gw" x="-2.5" y="-2.3" width="5" height="2.2" rx=".4"/><circle class="gw" cx="-1.7" cy="1" r=".6"/><circle class="gw" cx="1.7" cy="1" r=".6"/><path class="gf" d="M-2.6 3.4-3.6 5M2.6 3.4 3.6 5"/>`;
+  const order = [...TR_ALL].sort((a, b) => TRM.home.includes(a.id) - TRM.home.includes(b.id));
+  $("tr-stations").innerHTML = order.map((x) => `<g class="sn${TRM.home.includes(x.id) ? " home" : ""}" data-id="${esc(x.id)}"><circle class="hit" r="11"/>${GL}</g>`).join("");
+  TRM.sn = [...$("tr-stations").children].map((g) => { const x = st[g.dataset.id]; return { g, s: x, x: px(x.lon), y: py(x.lat) }; });
+  TRM.u = null;
   $("tr-lines").innerHTML = Object.entries(paths).map(([g, d2]) => `<path class="ln" data-g="${g}" stroke="${TR_GCOL[g]}" d="${d2.join("")}"/>`).join("");
   const c = homes[0] ? [px(homes[0].lon), py(homes[0].lat)] : [px(-73.98), py(40.75)];
   TRM.view = { cx: c[0], cy: c[1], w: 240 };
@@ -1687,8 +1701,9 @@ function trApplyView() {
   const r = pxr * v.w / cw;
   svg.style.setProperty("--tr", r.toFixed(2));
   TRM.nodes.forEach((n) => n.firstChild.setAttribute("r", r.toFixed(2)));
-  document.querySelectorAll("#tr-homes circle").forEach((c) => c.setAttribute("r", (r * 1.8).toFixed(2)));
-  cancelAnimationFrame(TRM.raf); TRM.raf = requestAnimationFrame(trTiles);
+  const u = v.w / cw, k = v.w > 600 ? 0.6 : v.w > 260 ? 0.85 : 1.2;       // station icon: ~7 px zoomed out, ~14 px zoomed in
+  if (TRM.sn && (TRM.u !== u || TRM.k !== k)) { TRM.u = u; TRM.k = k; TRM.sn.forEach((n) => n.g.setAttribute("transform", `translate(${n.x.toFixed(2)} ${n.y.toFixed(2)}) scale(${(u * k).toFixed(4)})`)); }
+  cancelAnimationFrame(TRM.raf); TRM.raf = requestAnimationFrame(() => { trTiles(); trLabels(); });
 }
 
 const trDark = () => matchMedia("(prefers-color-scheme: dark)").matches;
@@ -1711,6 +1726,35 @@ function trTiles() {
     layer.appendChild(im); TRM.tiles.set(k, im);
   }
   TRM.tiles.forEach((im, k) => { if (!keep.has(k)) { im.remove(); TRM.tiles.delete(k); } });
+}
+
+function trLabels() {
+  const svg = $("tr-map"), v = TRM.view, L = $("tr-labels");
+  if (!svg || !v || !L || !TRM.sn) return;
+  if (v.w > 300) { L.textContent = ""; return; }            // zoomed out: icons only; zoom in and names appear
+  const cw = svg.clientWidth || 800, ch = svg.clientHeight || 520, u = v.w / cw, x0 = v.cx - v.w / 2, y0 = v.cy - (v.w * ch / cw) / 2;
+  const vis = TRM.sn.filter((n) => n.x > x0 - 150 * u && n.x < x0 + v.w + 10 * u && n.y > y0 - 10 * u && n.y < y0 + ch * u + 10 * u);
+  vis.sort((a, b) => (b.g.classList.contains("home") - a.g.classList.contains("home")) || ((b.s.routes || []).length - (a.s.routes || []).length));
+  const boxes = vis.map((n) => { const sx = (n.x - x0) / u, sy = (n.y - y0) / u; return { l: sx - 8, r: sx + 8, t: sy - 8, b: sy + 8 }; });
+  let out = "";
+  for (const n of vis) {
+    const sx = (n.x - x0) / u, sy = (n.y - y0) / u, w = n.s.name.length * 6.4 + 4;
+    const box = { l: sx + 10, r: sx + 10 + w, t: sy - 7, b: sy + 7 };
+    if (box.r < 0 || box.l > cw) continue;
+    if (boxes.some((o, i) => o !== boxes[vis.indexOf(n)] && box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t)) continue;
+    boxes.push(box);
+    out += `<text class="lb" x="${(n.x + 10 * u).toFixed(2)}" y="${(n.y + 4 * u).toFixed(2)}" font-size="${(11.5 * u).toFixed(3)}" stroke-width="${(3.2 * u).toFixed(3)}">${esc(n.s.name)}</text>`;
+  }
+  L.innerHTML = out;
+}
+
+function trStationInfo(id) {
+  const x = TRM.proj && TRM.proj.st[id];
+  if (!x) return;
+  const lat = x.lat.toFixed(4), lon = x.lon.toFixed(4);
+  $("tr-info").innerHTML = `<strong>${esc(x.name)}</strong> ${(x.routes || []).map(rtBadge).join(" ")}<br>
+    <span class="note">${lat}, ${lon} · <a href="https://www.google.com/maps/search/?api=1&query=${lat},${lon}" target="_blank" rel="noopener">Open in Maps</a>${
+      detail && detail.stations && detail.stations.some((s) => s.id === id) ? "" : ` · <button type="button" class="btn" data-tradd="${esc(id)}">Show arrivals</button>`}</span>`;
 }
 
 async function trLoadMap() {
@@ -1747,6 +1791,7 @@ async function trLoadMap() {
 
 function trShowInfo() {
   document.querySelectorAll("#tr-trains .tg").forEach((n) => n.classList.toggle("sel", n.dataset.id === TRM.sel));
+  if (TRM.sn) TRM.sn.forEach((n) => n.g.classList.toggle("sel", n.s.id === TRM.selSt));
   const t = TRM.last && TRM.last.trains.find((x) => x.id === TRM.sel);
   if (!t) return;
   const m = Math.round((t.eta - Date.now()) / 60000);
@@ -1792,9 +1837,9 @@ function trZoom(f, ax, ay) {
     ptrs.delete(e.pointerId); pinch = 0;
     if (!ptrs.size && moved < 6) {                     // a tap: pick the nearest train under the finger
       const svg = $("tr-map"), g = e.target.closest && e.target.closest(".tg");
-      const ring = e.target.closest && e.target.closest(".st");
-      if (g) { TRM.sel = TRM.sel === g.dataset.id ? null : g.dataset.id; trShowInfo(); }
-      else if (ring) { TRM.sel = null; trShowInfo(); $("tr-info").innerHTML = `Station: <strong>${ring.dataset.name}</strong>`; }
+      const sn = e.target.closest && e.target.closest(".sn");
+      if (g) { TRM.sel = TRM.sel === g.dataset.id ? null : g.dataset.id; TRM.selSt = null; trShowInfo(); }
+      else if (sn) { TRM.sel = null; TRM.selSt = TRM.selSt === sn.dataset.id ? null : sn.dataset.id; trShowInfo(); if (TRM.selSt) trStationInfo(TRM.selSt); }
     }
   };
   document.addEventListener("pointerup", up);
