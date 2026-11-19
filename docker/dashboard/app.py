@@ -1492,7 +1492,7 @@ def station_name(stop_id):
     return s["name"] if s else stop_id
 
 
-def trains_at(ids):
+def trains_at(ids, limit=8):
     """Next trains at up to four station complexes. An id may be a complex ("c602") or a single platform group ("635");
     a complex merges every platform group in it (all three Union Sq stations are one place)."""
     data = train_trips()
@@ -1523,7 +1523,7 @@ def trains_at(ids):
             d.sort(key=lambda a: a["t"])
         mine = [a for a in alerts if routes & set(a["routes"]) or any(x in stops or x[:-1] in stops for x in a["stops"])]
         stations.append({"id": cid, "name": c["name"], "lat": c["lat"], "lon": c["lon"], "routes": sorted(routes, key=lambda r: (r.rstrip("X"), r)),
-                         "north": dirs["N"][:8], "south": dirs["S"][:8], "alerts": mine[:6]})
+                         "north": dirs["N"][:limit], "south": dirs["S"][:limit], "alerts": mine[:6]})
     return {"now": int(now * 1000), "feed_at": data["at"] * 1000, "feeds_down": data["failed"], "stations": stations}
 
 
@@ -1594,7 +1594,8 @@ def trains_map():
 
 def trains_page(qs):
     ids = [x for x in (qs.get("s", [""])[0] or ",".join(TRAIN_STATIONS)).split(",") if x in CX or x in STOP2CX][:4]
-    return trains_at(ids)
+    n = qs.get("n", ["8"])[0]
+    return trains_at(ids, min(60, int(n)) if n.isdigit() and int(n) > 0 else 8)
 
 
 

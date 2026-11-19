@@ -538,7 +538,7 @@ a.rainrow:hover strong { color: var(--accent); }
 /* trains */
 .rt { display: inline-grid; place-items: center; min-width: 24px; height: 24px; padding: 0 5px; border-radius: 12px; color: #fff; font-weight: 700; font-size: 13px; line-height: 1; flex: none; }
 .rt.dk { color: #111; }
-.rt.x { font-size: 11px; }
+.rt.xp { border-radius: 6px; }   /* express: rounded square instead of a circle */
 .trcols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 28px; }
 .trcol h4 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .trrow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); font-size: 14px; }
@@ -580,6 +580,18 @@ a.rainrow:hover strong { color: var(--accent); }
 .trmap .sn.sel .bg { stroke: var(--accent); stroke-width: 3px; fill: var(--accent-soft); }
 .trmap .lb { fill: #111; stroke: rgba(255,255,255,.92); stroke-linejoin: round; paint-order: stroke; font-weight: 600; pointer-events: none; }
 @media (prefers-color-scheme: dark) { .trmap .lb { fill: #eef2f6; stroke: rgba(0,0,0,.75); } }
+.trpop { position: absolute; z-index: 6; width: max-content; max-width: min(310px, calc(100% - 16px)); background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 28px rgba(0,0,0,.22); padding: 10px 12px 8px; font-size: 12.5px; }
+.trpop::after { content: ""; position: absolute; left: var(--ax, 50%); bottom: -6px; width: 10px; height: 10px; margin-left: -5px; background: var(--surface); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); transform: rotate(45deg); }
+.trpop.below::after { bottom: auto; top: -6px; transform: rotate(225deg); }
+.trpop h5 { margin: 0 0 6px; font-size: 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.trpop .x { border: 0; background: none; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.trpop .pl { max-height: min(200px, 28vh); overflow-y: auto; display: grid; gap: 5px; }
+.trpop .pr { display: grid; grid-template-columns: auto minmax(70px, 1fr) minmax(70px, 1fr); gap: 4px 12px; align-items: center; }
+.trpop .pr.hd { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; position: sticky; top: 0; background: var(--surface); }
+.trpop .pr .rt { height: 20px; min-width: 20px; font-size: 11px; }
+.trpop .pt { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.trpop .pt.soon { color: var(--ok); }
+.trpop .pt.none { color: var(--faint); font-weight: 400; }
 .trzoom { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .trzoom button { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); font-size: 18px; cursor: pointer; }
 .trfilters { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
@@ -1574,7 +1586,7 @@ const RT_COL = { 1: "#ee352e", 2: "#ee352e", 3: "#ee352e", 4: "#00933c", 5: "#00
   N: "#fccc0a", Q: "#fccc0a", R: "#fccc0a", W: "#fccc0a", S: "#808183", GS: "#808183", FS: "#808183", H: "#808183", SI: "#08179c" };
 const rtBadge = (r) => {
   const base = r.replace(/X$/, ""), x = r !== base;
-  return `<span class="rt${"NQRW".includes(base) ? " dk" : ""}${x ? " x" : ""}" style="background:${RT_COL[base] || "#808183"}" title="${esc(x ? base + " express" : r)}">${esc(base)}${x ? "<sup>◆</sup>" : ""}</span>`;
+  return `<span class="rt${"NQRW".includes(base) ? " dk" : ""}${x ? " xp" : ""}" style="background:${RT_COL[base] || "#808183"}" title="${esc(x ? base + " express" : r)}">${esc(base)}</span>`;
 };
 const trSaved = () => { try { const v = JSON.parse(store.get("trainStations") || "null"); return Array.isArray(v) && v.length ? v : null; } catch { return null; } };
 const trPath = () => { const v = trSaved(); return "/api/trains" + (v ? `?s=${encodeURIComponent(v.join(","))}` : ""); };
@@ -1618,7 +1630,7 @@ function renderTrains(d, quiet) {
       <div class="trmanage"><div id="tr-chips"></div><input id="tr-search" type="search" placeholder="Add a station (e.g. 33 St, Times Sq)" autocomplete="off"><div class="trresults" id="tr-results" hidden></div></div>
       <section class="panel trmapwrap"><div class="panel-head"><h2>Live map</h2><span class="meta" id="tr-map-meta"></span></div>
         <div class="trfilters" id="tr-filters" role="group" aria-label="Show lines"></div>
-        <div style="position:relative"><svg class="trmap" id="tr-map" role="img" aria-label="Live map of subway trains"></svg>
+        <div style="position:relative"><div class="trpop" id="tr-pop" hidden></div><svg class="trmap" id="tr-map" role="img" aria-label="Live map of subway trains"></svg>
           <span class="trattr">Map © <a href="https://www.esri.com" target="_blank" rel="noopener">Esri</a>, HERE, Garmin, OpenStreetMap contributors</span>
           <div class="trzoom"><button type="button" id="tr-zin" aria-label="Zoom in">+</button><button type="button" id="tr-zout" aria-label="Zoom out">−</button></div></div>
         <p class="trinfo note" id="tr-info">Tap a train or a station. Positions are estimated from the MTA's arrival times, so they are approximate.</p></section>
@@ -1660,7 +1672,7 @@ const trGroup = (r) => { const b = r.replace(/X$/, ""); return (TR_GROUPS.find((
 const TR_S = 655360;   // world width in map units (Web Mercator, so basemap tiles line up exactly)
 const TRM = { on: new Set(TR_GROUPS.map((g) => g[0])), timer: null, view: null, nodes: new Map(), proj: null, sel: null, last: null, net: null, home: [] };
 
-function stopTrMap() { clearInterval(TRM.timer); TRM.timer = null; TRM.nodes = new Map(); TRM.proj = null; TRM.tiles = new Map(); TRM.tz = null; }
+function stopTrMap() { clearInterval(TRM.timer); TRM.timer = null; TRM.nodes = new Map(); TRM.proj = null; TRM.tiles = new Map(); TRM.tz = null; TRM.selSt = null; TRM.popData = null; }
 
 async function trMapInit(d) {
   stopTrMap();
@@ -1705,7 +1717,7 @@ function trApplyView() {
   TRM.nodes.forEach((n) => n.firstChild.setAttribute("r", r.toFixed(2)));
   const u = v.w / cw, k = v.w > 600 ? 0.6 : v.w > 260 ? 0.85 : 1.2;       // station icon: ~7 px zoomed out, ~14 px zoomed in
   if (TRM.sn && (TRM.u !== u || TRM.k !== k)) { TRM.u = u; TRM.k = k; TRM.sn.forEach((n) => n.g.setAttribute("transform", `translate(${n.x.toFixed(2)} ${n.y.toFixed(2)}) scale(${(u * k).toFixed(4)})`)); }
-  cancelAnimationFrame(TRM.raf); TRM.raf = requestAnimationFrame(() => { trTiles(); trLabels(); });
+  cancelAnimationFrame(TRM.raf); TRM.raf = requestAnimationFrame(() => { trTiles(); trPopPos(); });
 }
 
 const trDark = () => matchMedia("(prefers-color-scheme: dark)").matches;
@@ -1730,13 +1742,51 @@ function trTiles() {
   TRM.tiles.forEach((im, k) => { if (!keep.has(k)) { im.remove(); TRM.tiles.delete(k); } });
 }
 
-function trLabels() {                      // only the tapped station gets a name on the map
-  const L = $("tr-labels"), v = TRM.view, svg = $("tr-map");
-  if (!L || !v || !svg) return;
-  const n = TRM.selSt && TRM.sn && TRM.sn.find((x) => x.s.id === TRM.selSt);
-  if (!n) { L.textContent = ""; return; }
-  const u = v.w / (svg.clientWidth || 800);
-  L.innerHTML = `<text class="lb" x="${(n.x + 11 * u).toFixed(2)}" y="${(n.y + 4.5 * u).toFixed(2)}" font-size="${(12.5 * u).toFixed(3)}" stroke-width="${(3.4 * u).toFixed(3)}">${esc(n.s.name)}</text>`;
+function trLabels() { const L = $("tr-labels"); if (L) L.textContent = ""; }   // names live in the popup now, so the map itself stays clean
+
+async function trPopLoad(id) {
+  try {
+    const d = await api(`/api/trains?s=${encodeURIComponent(id)}&n=40`);
+    if (TRM.selSt !== id) return;
+    TRM.popData = d.stations[0] || null;
+    trPopRender();
+  } catch {}
+}
+
+function trPopTimes(list) {
+  const m = list.slice(0, 2).map((t) => Math.round((t - Date.now()) / 60000));
+  if (!m.length) return `<span class="pt none">–</span>`;
+  return `<span class="pt${m[0] <= 2 ? " soon" : ""}">${m.map((x) => (x <= 0 ? "Now" : x)).join(" · ")}${m.some((x) => x > 0) ? " min" : ""}</span>`;
+}
+
+function trPopRender() {
+  const pop = $("tr-pop");
+  if (!pop) return;
+  const x = TRM.selSt && TRM.proj && TRM.proj.st[TRM.selSt];
+  if (!x) { pop.hidden = true; return; }
+  const d = TRM.popData && TRM.popData.id === TRM.selSt ? TRM.popData : null, per = {};
+  if (d) for (const [k, list] of [["N", d.north], ["S", d.south]]) for (const a of list) (per[a.route] ||= { N: [], S: [] })[k].push(a.t);
+  const routes = Object.keys(per).sort((a, b) => a.replace(/X$/, "").localeCompare(b.replace(/X$/, "")) || a.localeCompare(b));
+  pop.innerHTML = `<h5><span>${esc(x.name)}</span><button type="button" class="x" data-trpopx aria-label="Close">×</button></h5>`
+    + (!d ? `<p class="note">Loading…</p>` : routes.length
+      ? `<div class="pl"><div class="pr hd"><span></span><span>↑ Uptown</span><span>↓ Downtown</span></div>${routes.map((r) => `<div class="pr">${rtBadge(r)}${trPopTimes(per[r].N)}${trPopTimes(per[r].S)}</div>`).join("")}</div>`
+      : `<p class="note">No trains in the next hour.</p>`);
+  pop.hidden = false;
+  trPopPos();
+}
+
+function trPopPos() {
+  const pop = $("tr-pop"), svg = $("tr-map"), v = TRM.view;
+  if (!pop || pop.hidden || !v || !svg || !TRM.sn) return;
+  const n = TRM.sn.find((q) => q.s.id === TRM.selSt);
+  if (!n) { pop.hidden = true; return; }
+  const cw = svg.clientWidth, ch = svg.clientHeight, u = v.w / cw, sx = (n.x - (v.cx - v.w / 2)) / u, sy = (n.y - (v.cy - (v.w * ch / cw) / 2)) / u;
+  if (sx < -20 || sx > cw + 20 || sy < -20 || sy > ch + 20) { pop.style.visibility = "hidden"; return; }
+  pop.style.visibility = "";
+  const w = pop.offsetWidth, h = pop.offsetHeight, left = Math.max(8, Math.min(cw - w - 8, sx - w / 2)), below = sy < h + 24 && ch - sy > sy;
+  pop.style.left = `${left}px`; pop.style.top = `${below ? sy + 16 : sy - h - 14}px`;
+  pop.classList.toggle("below", below);
+  pop.style.setProperty("--ax", `${Math.max(16, Math.min(w - 16, sx - left))}px`);
 }
 
 async function trStationInfo(id) {
@@ -1783,6 +1833,7 @@ async function trLoadMap() {
     $("tr-map-meta").textContent = `${m.trains.filter((t) => TRM.on.has(trGroup(t.route))).length} trains running${m.feeds_down ? " · some feeds missing" : ""}`;
     trApplyView();
     trShowInfo();
+    if (TRM.selSt) trPopLoad(TRM.selSt);
   } catch (e) { $("tr-info") && ($("tr-info").textContent = `Couldn't load trains: ${e.message}`); }
 }
 
@@ -1790,7 +1841,7 @@ function trShowInfo() {
   document.querySelectorAll("#tr-trains .tg").forEach((n) => n.classList.toggle("sel", n.dataset.id === TRM.sel));
   if (TRM.sn) TRM.sn.forEach((n) => n.g.classList.toggle("sel", n.s.id === TRM.selSt));
   const t = TRM.last && TRM.last.trains.find((x) => x.id === TRM.sel);
-  if (!t) return;
+  if (!t) { if (!TRM.selSt && $("tr-info")) $("tr-info").textContent = "Tap a train or a station. Positions are estimated from the MTA's arrival times, so they are approximate."; return; }
   const m = Math.round((t.eta - Date.now()) / 60000);
   $("tr-info").innerHTML = `${rtBadge(t.route)} <strong>${esc(t.dir === "N" ? "Uptown" : "Downtown")}</strong> to ${esc(t.to)} · next stop <strong>${esc(t.next)}</strong> ${m <= 0 ? "now" : `in ${m} min`}`;
 }
@@ -1836,14 +1887,16 @@ function trZoom(f, ax, ay) {
     if (!ptrs.size && moved < 6) {                     // a tap: pick the nearest train under the finger
       const g = downEl && downEl.closest && downEl.closest(".tg");
       const sn = downEl && downEl.closest && downEl.closest(".sn");
-      if (g) { TRM.sel = TRM.sel === g.dataset.id ? null : g.dataset.id; TRM.selSt = null; trShowInfo(); trLabels(); }
-      else if (sn) { TRM.sel = null; TRM.selSt = TRM.selSt === sn.dataset.id ? null : sn.dataset.id; trShowInfo(); trLabels(); if (TRM.selSt) trStationInfo(TRM.selSt); }
+      if (g) { TRM.sel = TRM.sel === g.dataset.id ? null : g.dataset.id; TRM.selSt = null; trShowInfo(); trPopRender(); }
+      else if (sn) { TRM.sel = null; TRM.selSt = TRM.selSt === sn.dataset.id ? null : sn.dataset.id; TRM.popData = null; trShowInfo(); trPopRender(); if (TRM.selSt) { trStationInfo(TRM.selSt); trPopLoad(TRM.selSt); } }
+      else if (TRM.selSt) { TRM.selSt = null; trShowInfo(); trPopRender(); }       // tap on empty map closes the popup
     }
   };
   document.addEventListener("pointerup", up);
   document.addEventListener("pointercancel", up);
   document.addEventListener("wheel", (e) => { if (e.target.closest && e.target.closest("#tr-map")) { e.preventDefault(); trZoom(e.deltaY > 0 ? 1.2 : 1 / 1.2, e.clientX, e.clientY); } }, { passive: false });
   document.addEventListener("click", (e) => {
+    if (e.target.closest && e.target.closest("[data-trpopx]")) { TRM.selSt = null; trShowInfo(); trPopRender(); return; }
     if (e.target.id === "tr-zin") trZoom(1 / 1.5);
     else if (e.target.id === "tr-zout") trZoom(1.5);
     const f = e.target.closest("[data-trg]");
