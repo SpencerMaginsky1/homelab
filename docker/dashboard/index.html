@@ -2008,8 +2008,13 @@ document.addEventListener("click", (e) => {
   TP.shown = i;
   tpRender(TP.last);
   trDrawRoute(TP.last.options[i], true);
-  const m = $("tr-map");
-  if (m && m.getBoundingClientRect().top > innerHeight * 0.5) m.scrollIntoView({ behavior: "smooth", block: "center" });   // phone: the map is below
+  // Phone: bring the map up. Scroll to its panel by hand: Safari's scrollIntoView on an SVG lands in the wrong place
+  // (it sent the page to the bottom), and only scroll when the map isn't already mostly on screen.
+  const panel = document.querySelector(".trmapwrap");
+  if (panel) {
+    const pr = panel.getBoundingClientRect();
+    if (pr.top > innerHeight * 0.45 || pr.bottom < innerHeight * 0.3) window.scrollTo({ top: Math.max(0, scrollY + pr.top - 8), behavior: "smooth" });
+  }
 });
 
 /* live map */
