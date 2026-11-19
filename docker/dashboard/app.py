@@ -1589,6 +1589,7 @@ def trains_map():
         d = stops[0][0][-1:]
         pred = NETWORK["pred"].get(tr["route"], {}).get(d, {})
         i = next((k for k, (_, t) in enumerate(stops) if t >= now), len(stops))
+        ta = tb = now
         if i >= len(stops):
             a = b = STATIONS.get(stops[-1][0][:-1])
             frac = 0.0
@@ -1598,17 +1599,20 @@ def trains_map():
                 a = STATIONS.get(stops[i - 1][0][:-1])
                 span = stops[i][1] - stops[i - 1][1]
                 frac = (now - stops[i - 1][1]) / span if span > 0 else 1.0
+                ta, tb = stops[i - 1][1], stops[i][1]
             else:
                 a = STATIONS.get(pred.get(stops[0][0][:-1], ""))
                 if a and b:
                     seg = max(60.0, _km(a, b) / 0.0075)       # ~27 km/h average between stops
                     frac = 1.0 - (stops[0][1] - now) / seg
+                    ta, tb = stops[0][1] - seg, stops[0][1]
                 else:
                     a, frac = b, 0.0
             if tr["veh"][0] == 1 and tr["veh"][1]:        # the feed says it is standing in a station
                 here = STATIONS.get(tr["veh"][1][:-1])
                 if here:
                     a = b = here
+                    ta = tb = now
         if not a or not b:
             continue
         frac = max(0.0, min(1.0, frac))
@@ -1617,6 +1621,7 @@ def trains_map():
         at = STOP2CX.get(here["id"]) if here else None
         lat, lon = _along(a, b, frac)
         out.append({"id": tr["id"], "route": tr["route"], "dir": d, "lat": round(lat, 5), "lon": round(lon, 5),
+                    "a": a["id"], "b": b["id"], "ta": int(ta * 1000), "tb": int(tb * 1000),     # the page moves the dot along the track itself
                     "to": station_name(stops[-1][0]), "next": station_name(nxt[0]), "eta": nxt[1] * 1000, "at": at})
     return {"now": int(now * 1000), "feeds_down": data["failed"], "trains": out}
 

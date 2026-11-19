@@ -578,7 +578,6 @@ a.rainrow:hover strong { color: var(--accent); }
 .trmap .tg[data-g="L"] circle { fill: var(--map-l); }
 .trattr { position: absolute; left: 8px; bottom: 6px; font-size: 10px; color: #444; background: rgba(255,255,255,.75); padding: 1px 5px; border-radius: 4px; }
 .trattr a { color: inherit; }
-.trmap .tg { transition: transform 14s linear; }
 .trmap .tg circle { stroke: var(--surface); vector-effect: non-scaling-stroke; stroke-width: 1px; cursor: pointer; }
 .trmap .tg.at { pointer-events: none; }
 .trmap .tg.at circle { stroke-width: 1.5px; }
@@ -1708,9 +1707,9 @@ const TR_GROUPS = [["123", "1 2 3"], ["456", "4 5 6"], ["7", "7"], ["ACE", "A C 
 const TR_GCOL = { "123": "#ee352e", "456": "#00933c", "7": "#b933ad", ACE: "#0039a6", BDFM: "#ff6319", G: "#6cbe45", JZ: "#996633", L: "#a7a9ac", NQRW: "#fccc0a", S: "#808183", SI: "#08179c", SS: "#08179c" };
 const trGroup = (r) => { if (r === "SI" || r === "SS") return "SI"; if (RT_LABEL[r] === "S") return "S"; const b = r.replace(/X$/, ""); return (TR_GROUPS.find(([g]) => g.includes(b)) || ["S"])[0]; };
 const TR_S = 655360;   // world width in map units (Web Mercator, so basemap tiles line up exactly)
-const TRM = { on: new Set(TR_GROUPS.map((g) => g[0])), timer: null, view: null, nodes: new Map(), proj: null, sel: null, last: null, net: null, home: [] };
+const TRM = { on: new Set(TR_GROUPS.map((g) => g[0])), timer: null, view: null, nodes: new Map(), proj: null, sel: null, last: null, net: null, home: [], segc: new Map() };
 
-function stopTrMap() { clearInterval(TRM.timer); TRM.timer = null; TRM.nodes = new Map(); TRM.proj = null; TRM.tiles = new Map(); TRM.tz = null; TRM.selSt = null; TRM.popData = null; }
+function stopTrMap() { clearInterval(TRM.timer); clearInterval(TRM.anim); TRM.timer = null; TRM.segc = new Map(); TRM.nodes = new Map(); TRM.proj = null; TRM.tiles = new Map(); TRM.tz = null; TRM.selSt = null; TRM.popData = null; }
 
 async function trMapInit(d) {
   stopTrMap();
@@ -1728,9 +1727,10 @@ async function trMapInit(d) {
   const py = (lat) => { const r = lat * Math.PI / 180; return TR_S * (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2; };
   TRM.proj = { px, py, st };
   const paths = {};
+  TRM.stop2cx = {};
+  for (const c of TR_ALL) for (const sid of c.stops || []) TRM.stop2cx[sid] = [c.lat, c.lon];
   for (const [a, b, g] of TRM.net.edges) {          // the real track between two stations when we have it, else a straight line
-    const seg = (TRM.net.segs || {})[`${a}|${b}`], A = TR_STOPS[a], B = TR_STOPS[b];
-    const pts = seg || (A && B ? [A, B] : null);
+    const pts = trTrack(a, b);
     if (pts) (paths[g] ||= []).push("M" + pts.map((p) => `${px(p[1]).toFixed(1)} ${py(p[0]).toFixed(1)}`).join("L"));
   }
   const homes = TRM.home.map((id) => st[id]).filter(Boolean);
@@ -1747,6 +1747,7 @@ async function trMapInit(d) {
   trApplyView(true);
   trLoadMap();
   TRM.timer = setInterval(() => { if (!document.hidden && $("tr-map")) trLoadMap(); }, 15000);
+  TRM.anim = setInterval(() => { if (!document.hidden) trTick(); }, 500);
 }
 
 function trApplyView() {
@@ -1873,34 +1874,74 @@ async function trLoadMap() {
     const m = await api("/api/trains/map");
     if (!$("tr-map") || !TRM.proj) return;
     TRM.last = m;
+    TRM.skew = m.now - Date.now();                    // the server's clock vs this device's, so phones with a drifting clock still line up
     const { px, py } = TRM.proj, layer = $("tr-trains"), seen = new Set();
     for (const t of m.trains) {
       seen.add(t.id);
       let n = TRM.nodes.get(t.id);
       const home = t.at && TRM.proj.st[t.at];
-      const x = home ? px(home.lon) : px(t.lon), y = home ? py(home.lat) : py(t.lat);
       if (!n) {
         n = document.createElementNS("http://www.w3.org/2000/svg", "g");
         n.setAttribute("class", "tg");
         n.dataset.id = t.id;
-        n.style.transition = "none";
-        n.style.transform = `translate(${x}px, ${y}px)`;
         const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
         c.setAttribute("r", $("tr-map").style.getPropertyValue("--tr") || "2");
         n.appendChild(c); layer.appendChild(n); TRM.nodes.set(t.id, n);
-        requestAnimationFrame(() => { n.style.transition = ""; });
-      } else n.style.transform = `translate(${x}px, ${y}px)`;
+      }
       n.firstChild.setAttribute("fill", RT_COL[t.route.replace(/X$/, "")] || "#808183");
       n.dataset.at = home ? t.at : "";
       n.dataset.g = trGroup(t.route);
       n.style.display = TRM.on.has(n.dataset.g) ? "" : "none";
     }
     TRM.nodes.forEach((n, id) => { if (!seen.has(id)) { n.remove(); TRM.nodes.delete(id); } });
+    trTick();
     $("tr-map-meta").textContent = `${m.trains.filter((t) => TRM.on.has(trGroup(t.route))).length} trains running${m.feeds_down ? " · some feeds missing" : ""}`;
     trApplyView();
     trShowInfo();
     if (TRM.selSt) trPopLoad(TRM.selSt);
   } catch (e) { $("tr-info") && ($("tr-info").textContent = `Couldn't load trains: ${e.message}`); }
+}
+
+// Each train knows the stretch it's on (station a -> b) and when it left a and reaches b; every half second the page
+// works out how far along that is and puts the dot on that point of the real track. No CSS sliding, so no corner-cutting.
+// Track from station a to station b (a < b), stretched at both ends to the station icons: an icon sits in the middle of its
+// complex (e.g. between Grand Central's three platforms), so without this the line stops short of it.
+function trTrack(a, b) {
+  const seg = TRM.net && TRM.net.segs && TRM.net.segs[`${a}|${b}`], A = TR_STOPS[a], B = TR_STOPS[b];
+  const pts = seg || (A && B ? [A, B] : null);
+  if (!pts) return null;
+  const ca = TRM.stop2cx && TRM.stop2cx[a], cb = TRM.stop2cx && TRM.stop2cx[b];
+  return [...(ca ? [ca] : []), ...pts, ...(cb ? [cb] : [])];
+}
+function trSeg(a, b) {
+  const flip = a > b, key = flip ? `${b}|${a}` : `${a}|${b}`;
+  let s = TRM.segc.get(key);
+  if (s === undefined) {
+    const pts = flip ? trTrack(b, a) : trTrack(a, b);
+    s = null;
+    if (pts) { const cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], (pts[i][1] - pts[i - 1][1]) * 0.757)); s = { pts, cum }; }
+    TRM.segc.set(key, s);
+  }
+  return s && { pts: s.pts, cum: s.cum, flip };
+}
+function trPoint(t, now) {                         // [lat, lon] of a train right now
+  if (t.at && TRM.proj.st[t.at]) { const h = TRM.proj.st[t.at]; return [h.lat, h.lon]; }
+  if (!t.a || t.a === t.b || !(t.tb > t.ta)) return [t.lat, t.lon];
+  const f = Math.max(0, Math.min(1, (now - t.ta) / (t.tb - t.ta))), seg = trSeg(t.a, t.b);
+  if (!seg) return [t.lat, t.lon];
+  const { pts, cum } = seg, want = (seg.flip ? 1 - f : f) * cum[cum.length - 1];
+  for (let i = 1; i < cum.length; i++) if (cum[i] >= want) { const g = (want - cum[i - 1]) / ((cum[i] - cum[i - 1]) || 1); return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * g, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * g]; }
+  return pts[pts.length - 1];
+}
+function trTick() {
+  if (!TRM.last || !TRM.proj || !$("tr-map")) return;
+  const now = Date.now() + (TRM.skew || 0), { px, py } = TRM.proj;
+  for (const t of TRM.last.trains) {
+    const n = TRM.nodes.get(t.id);
+    if (!n || n.style.display === "none") continue;
+    const [la, lo] = trPoint(t, now);
+    n.style.transform = `translate(${px(lo).toFixed(2)}px, ${py(la).toFixed(2)}px)`;
+  }
 }
 
 function trShowInfo() {
@@ -1985,7 +2026,7 @@ function trZoom(f, ax, ay) {
       document.querySelectorAll("#tr-filters button").forEach((b) => b.setAttribute("aria-pressed", String(TRM.on.has(b.dataset.trg))));
       document.querySelectorAll("#tr-lines .ln").forEach((l) => { l.style.display = TRM.on.has(l.dataset.g) ? "" : "none"; });
       TRM.nodes.forEach((n) => { n.style.display = TRM.on.has(n.dataset.g) ? "" : "none"; });
-      trApplyView();
+      trApplyView(); trTick();
     }
   });
   window.addEventListener("resize", () => trApplyView());
