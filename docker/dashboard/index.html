@@ -1719,7 +1719,11 @@ async function trMapInit(d) {
   const py = (lat) => { const r = lat * Math.PI / 180; return TR_S * (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2; };
   TRM.proj = { px, py, st };
   const paths = {};
-  for (const [a, b, g] of TRM.net.edges) { const A = TR_STOPS[a], B = TR_STOPS[b]; if (A && B) (paths[g] ||= []).push(`M${px(A[1]).toFixed(1)} ${py(A[0]).toFixed(1)}L${px(B[1]).toFixed(1)} ${py(B[0]).toFixed(1)}`); }
+  for (const [a, b, g] of TRM.net.edges) {          // the real track between two stations when we have it, else a straight line
+    const seg = (TRM.net.segs || {})[`${a}|${b}`], A = TR_STOPS[a], B = TR_STOPS[b];
+    const pts = seg || (A && B ? [A, B] : null);
+    if (pts) (paths[g] ||= []).push("M" + pts.map((p) => `${px(p[1]).toFixed(1)} ${py(p[0]).toFixed(1)}`).join("L"));
+  }
   const homes = TRM.home.map((id) => st[id]).filter(Boolean);
   svg.innerHTML = `<g id="tr-tiles"></g><g id="tr-lines"></g><g id="tr-stations"></g><g id="tr-labels"></g><g id="tr-trains"></g>`;
   const GL = `<rect class="bg" x="-6" y="-6" width="12" height="12" rx="3"/><path class="gl" d="M-3.5-3.2h7v5.4h-7z"/><rect class="gw" x="-2.5" y="-2.3" width="5" height="2.2" rx=".4"/><circle class="gw" cx="-1.7" cy="1" r=".6"/><circle class="gw" cx="1.7" cy="1" r=".6"/><path class="gf" d="M-2.6 3.4-3.6 5M2.6 3.4 3.6 5"/>`;

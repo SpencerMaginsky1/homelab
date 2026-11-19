@@ -1543,6 +1543,33 @@ for _r, _dirs in NETWORK["pred"].items():
 STATION_ROUTES = {k: sorted(v, key=lambda r: (r.rstrip("X"), r)) for k, v in STATION_ROUTES.items()}
 
 
+# Track geometry between neighbouring stations ("A|B" with A < B) and each piece's running length, so a train
+# that is x% of the way from A to B is drawn x% of the way along the real curve, not on the straight line.
+SEGS = {}
+for _k, _pts in NETWORK.get("segs", {}).items():
+    _cum = [0.0]
+    for _p, _q in zip(_pts, _pts[1:]):
+        _cum.append(_cum[-1] + (((_p[0] - _q[0]) * 111.0) ** 2 + ((_p[1] - _q[1]) * 84.0) ** 2) ** 0.5)
+    SEGS[tuple(_k.split("|"))] = (_pts, _cum)
+
+
+def _along(a, b, frac):
+    """Point frac of the way from station a to station b, following the track when we have it."""
+    if a is b or a["id"] == b["id"]:
+        return a["lat"], a["lon"]
+    flip = a["id"] > b["id"]
+    seg = SEGS.get((b["id"], a["id"]) if flip else (a["id"], b["id"]))
+    if not seg or seg[1][-1] <= 0:
+        return a["lat"] + (b["lat"] - a["lat"]) * frac, a["lon"] + (b["lon"] - a["lon"]) * frac
+    pts, cum = seg
+    want = (1 - frac if flip else frac) * cum[-1]
+    for i in range(1, len(cum)):
+        if cum[i] >= want:
+            f = (want - cum[i - 1]) / ((cum[i] - cum[i - 1]) or 1)
+            return pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f
+    return pts[-1][0], pts[-1][1]
+
+
 def _km(a, b):
     dy = (a["lat"] - b["lat"]) * 111.0
     dx = (a["lon"] - b["lon"]) * 84.0
@@ -1588,8 +1615,8 @@ def trains_map():
         nxt = stops[i] if i < len(stops) else stops[-1]
         here = a if a is b or frac <= 0.03 else b if frac >= 0.97 else None   # standing (or as good as) at a station
         at = STOP2CX.get(here["id"]) if here else None
-        out.append({"id": tr["id"], "route": tr["route"], "dir": d,
-                    "lat": round(a["lat"] + (b["lat"] - a["lat"]) * frac, 5), "lon": round(a["lon"] + (b["lon"] - a["lon"]) * frac, 5),
+        lat, lon = _along(a, b, frac)
+        out.append({"id": tr["id"], "route": tr["route"], "dir": d, "lat": round(lat, 5), "lon": round(lon, 5),
                     "to": station_name(stops[-1][0]), "next": station_name(nxt[0]), "eta": nxt[1] * 1000, "at": at})
     return {"now": int(now * 1000), "feeds_down": data["failed"], "trains": out}
 
@@ -1863,7 +1890,7 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/trains/map":
                 return self.send(200, trains_map())
             if p == "/api/trains/network":
-                return self.send(200, {"edges": NETWORK["edges"]})
+                return self.send(200, {"edges": NETWORK["edges"], "segs": NETWORK.get("segs", {})})
             if p == "/api/trains/stations":
                 return self.send(200, {"default": [STOP2CX.get(x, x) for x in TRAIN_STATIONS],
                                        "stations": [{"id": c["id"], "name": c["name"], "lat": c["lat"], "lon": c["lon"], "stops": c["stops"],
