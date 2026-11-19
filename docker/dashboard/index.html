@@ -589,6 +589,26 @@ a.rainrow:hover strong { color: var(--accent); }
 .tpout { display: grid; gap: 10px; margin-top: 12px; }
 .tpopt { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--surface); }
 .tpopt.best { border-color: var(--accent); }
+.tpopt { cursor: pointer; transition: box-shadow .15s; }
+.tpopt:hover { box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+.tpopt.shown { box-shadow: 0 0 0 2px var(--accent); }
+.tptag { font-size: 11.5px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); }
+.tptag.best { background: var(--ok-soft); color: var(--ok); }
+.tptag.plain { background: var(--sunk); color: var(--muted); font-weight: 500; }
+.tpmap { margin-left: auto; font-size: 12.5px; font-weight: 600; color: var(--accent); }
+/* the picked trip on the map */
+.trmap.routing .ln:not(.lc) { opacity: .22; }
+.trmap.routing .ln.lc { opacity: .35; }
+.trmap.routing .tg { opacity: .3; }
+.trmap.routing .sn { opacity: .4; }
+.trmap.routing .sn.onroute { opacity: 1; }
+.trmap.routing .tg.onroute { opacity: 1; }
+.trmap .tg.onroute circle { stroke: var(--fg); stroke-width: 2.5px; }
+.trmap .rcase { fill: none; stroke: var(--map-case); stroke-width: 9px; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.trmap .rride { fill: none; stroke-width: 5.5px; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.trmap .rwalk { fill: none; stroke: var(--fg); stroke-width: 2.5px; stroke-dasharray: 1 6; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.trmap .rpin { stroke: #fff; stroke-width: 2.5px; vector-effect: non-scaling-stroke; }
+.trclear { position: absolute; left: 10px; top: 10px; z-index: 5; border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.15); touch-action: manipulation; }
 .tpsum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .tpsum .tot { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .tpsum .arr { font-weight: 600; }
@@ -1726,7 +1746,7 @@ function renderTrains(d, quiet) {
       <section class="panel trplan" id="tp"></section>
       <section class="panel trmapwrap"><div class="panel-head"><h2>Live map</h2><span class="meta" id="tr-map-meta"></span></div>
         <div class="trfilters" id="tr-filters" role="group" aria-label="Show lines"></div>
-        <div style="position:relative"><div class="trpop" id="tr-pop" hidden></div><svg class="trmap" id="tr-map" role="img" aria-label="Live map of subway trains"></svg>
+        <div style="position:relative"><div class="trpop" id="tr-pop" hidden></div><button type="button" class="trclear" id="tr-clear" hidden>✕ Clear trip</button><svg class="trmap" id="tr-map" role="img" aria-label="Live map of subway trains"></svg>
           <span class="trattr">Map © <a href="https://www.esri.com" target="_blank" rel="noopener">Esri</a>, HERE, Garmin, OpenStreetMap contributors</span>
           <div class="trzoom"><button type="button" id="tr-zin" aria-label="Zoom in">+</button><button type="button" id="tr-zout" aria-label="Zoom out">−</button></div></div>
         <p class="trinfo note" id="tr-info">Tap a train or a station. Positions are estimated from the MTA's arrival times, so they are approximate.</p></section>
@@ -1874,7 +1894,9 @@ async function tpPlan() {
   try {
     const r = await api(`/api/trains/plan?from=${encodeURIComponent(tpSpec(TP.from))}&to=${encodeURIComponent(tpSpec(TP.to))}`);
     if (seq !== TP.pseq || !$("tp-out")) return;
-    TP.last = r; tpRender(r);
+    TP.last = r;
+    if (TP.shown != null) { TP.shown = null; trClearRoute(); }
+    tpRender(r);
   } catch (e) { if ($("tp-out")) $("tp-out").innerHTML = `<p class="empty">Couldn't plan that: ${esc(e.message)}</p>`; }
 }
 
@@ -1892,9 +1914,12 @@ function tpRender(r) {
       if (l.type === "transfer") return `<li><span class="ic">${XFER_SVG}</span><span>${l.walk ? `Walk to <strong>${esc(l.to)}</strong>` : `Change trains at <strong>${esc(l.to)}</strong>`}<span class="sub">allow ${l.min} min</span></span></li>`;
       return `<li><span class="ic">${rtBadge(l.route)}</span><span><strong>${esc(l.from)}</strong> ${fmtClock(l.dep)} → <strong>${esc(l.to)}</strong> ${fmtClock(l.arr)}<span class="sub">${esc(trDir(l.route, l.dir))} to ${esc(l.headsign)} · ${l.stops - 1} stop${l.stops - 1 === 1 ? "" : "s"}</span></span></li>`;
     }).join("");
-    return `<div class="tpopt${i === 0 ? " best" : ""}">
+    const tag = i === 0 ? `<span class="tptag best">Fastest</span>` : `<span class="tptag">+${o.slower_min || 0} min</span>`;
+    const chg = `<span class="tptag plain">${o.changes ? `${o.changes} change${o.changes > 1 ? "s" : ""}` : "no changes"}</span>`;
+    return `<div class="tpopt${i === 0 ? " best" : ""}${TP.shown === i ? " shown" : ""}" data-tpopt="${i}" role="button" tabindex="0" aria-label="Show this trip on the map">
       <div class="tpsum"><span class="tot">${tot} min</span><span class="arr">arrive ${fmtClock(o.arrive)}</span>
-        <span class="lv${lv <= 1 ? " now" : ""}">${lv <= 0 ? "leave now" : `leave in ${lv} min`}</span></div>
+        <span class="lv${lv <= 1 ? " now" : ""}">${lv <= 0 ? "leave now" : `leave in ${lv} min`}</span>${tag}${chg}
+        <span class="tpmap">${TP.shown === i ? "On the map ✓" : "Show on map"}</span></div>
       <div class="tpchain">${chain}${(o.later || []).length ? `<span class="tplater">· also ${o.later.map((x) => `${x.route !== rides[0].route ? rtBadge(x.route) + " " : ""}${fmtClock(x.dep)}`).join(", ")}</span>` : ""}</div>
       ${i === 0 ? `<ul class="tplegs">${legs}</ul>` : `<details><summary>Steps (first train ${fmtClock(rides[0].dep)})</summary><ul class="tplegs">${legs}</ul></details>`}
     </div>`;
@@ -1923,6 +1948,70 @@ document.addEventListener("click", (e) => {
   if (!e.target.closest(".tpf")) document.querySelectorAll(".tpsug").forEach((b) => { b.hidden = true; });
 });
 
+/* the picked trip on the live map */
+function trRidePoints(path) {                       // the real track through a ride's stations, in order
+  const out = [];
+  for (let i = 0; i + 1 < path.length; i++) {
+    const a = path[i], b = path[i + 1];
+    let pts = a < b ? trTrack(a, b) : (trTrack(b, a) || []).slice().reverse();
+    if (!pts || !pts.length) { const A = TR_STOPS[a], B = TR_STOPS[b]; pts = A && B ? [A, B] : []; }
+    out.push(...(out.length ? pts.slice(1) : pts));
+  }
+  return out;
+}
+function trDrawRoute(o, fit) {
+  const svg = $("tr-map"), L = $("tr-route");
+  if (!svg || !L || !TRM.proj || !o) return;
+  const { px, py } = TRM.proj, r = TP.last, P = (p) => `${px(p[1]).toFixed(1)} ${py(p[0]).toFixed(1)}`;
+  const line = (pts) => "M" + pts.map(P).join("L");
+  const rides = o.legs.filter((l) => l.type === "ride").map((l) => ({ l, pts: trRidePoints(l.path || []) })).filter((x) => x.pts.length);
+  if (!rides.length) return;
+  const walks = [];
+  if (r.from) walks.push([r.from, rides[0].pts[0]]);
+  for (let i = 0; i + 1 < rides.length; i++) walks.push([rides[i].pts[rides[i].pts.length - 1], rides[i + 1].pts[0]]);
+  if (r.to) walks.push([rides[rides.length - 1].pts[rides[rides.length - 1].pts.length - 1], r.to]);
+  L.innerHTML = walks.map((w) => `<path class="rwalk" d="${line(w)}"/>`).join("")
+    + rides.map(({ pts }) => `<path class="rcase" d="${line(pts)}"/>`).join("")
+    + rides.map(({ l, pts }) => `<path class="rride" stroke="${RT_COL[l.route] || RT_COL[l.route.replace(/X$/, "")] || "#808183"}" d="${line(pts)}"/>`).join("")
+    + (r.from ? `<circle class="rpin" cx="${px(r.from[1])}" cy="${py(r.from[0])}" r="1" fill="var(--accent)" data-pin="a"/>` : "")
+    + (r.to ? `<circle class="rpin" cx="${px(r.to[1])}" cy="${py(r.to[0])}" r="1" fill="#d4453b" data-pin="b"/>` : "");
+  svg.classList.add("routing");
+  TRM.routeTrips = new Set(rides.map((x) => x.l.trip).filter(Boolean));
+  TRM.nodes.forEach((n, id) => n.classList.toggle("onroute", TRM.routeTrips.has(id)));
+  const onPath = new Set(rides.flatMap((x) => (x.l.path || []).map((sid) => TRM.stop2cxId && TRM.stop2cxId[sid])));
+  if (TRM.sn) TRM.sn.forEach((n) => n.g.classList.toggle("onroute", onPath.has(n.s.id)));
+  $("tr-clear").hidden = false;
+  if (fit) {                                        // zoom to the whole trip
+    const all = [...rides.flatMap((x) => x.pts), ...(r.from ? [r.from] : []), ...(r.to ? [r.to] : [])];
+    const xs = all.map((p) => px(p[1])), ys = all.map((p) => py(p[0]));
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), a = svg.clientWidth / svg.clientHeight;
+    TRM.view = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(25, (x1 - x0) * 1.25, (y1 - y0) * 1.25 * a) };
+  }
+  trApplyView();
+}
+function trClearRoute() {
+  TP.shown = null; TRM.routeTrips = null;
+  const svg = $("tr-map");
+  if (svg) svg.classList.remove("routing");
+  if ($("tr-route")) $("tr-route").textContent = "";
+  if ($("tr-clear")) $("tr-clear").hidden = true;
+  TRM.nodes.forEach((n) => n.classList.remove("onroute"));
+  if (TRM.sn) TRM.sn.forEach((n) => n.g.classList.remove("onroute"));
+  if (TP.last) tpRender(TP.last);
+}
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#tr-clear")) { trClearRoute(); return; }
+  const card = e.target.closest("[data-tpopt]");
+  if (!card || e.target.closest("summary, a, button")) return;
+  const i = +card.dataset.tpopt;
+  if (TP.shown === i) { trClearRoute(); return; }
+  TP.shown = i;
+  tpRender(TP.last);
+  trDrawRoute(TP.last.options[i], true);
+  const m = $("tr-map");
+  if (m && m.getBoundingClientRect().top > innerHeight * 0.5) m.scrollIntoView({ behavior: "smooth", block: "center" });   // phone: the map is below
+});
+
 /* live map */
 const TR_GROUPS = [["123", "1 2 3"], ["456", "4 5 6"], ["7", "7"], ["ACE", "A C E"], ["BDFM", "B D F M"], ["G", "G"], ["JZ", "J Z"], ["L", "L"], ["NQRW", "N Q R W"], ["S", "GS"], ["SI", "SI"]];
 const TR_GCOL = { "123": "#ee352e", "456": "#00933c", "7": "#b933ad", ACE: "#0039a6", BDFM: "#ff6319", G: "#6cbe45", JZ: "#996633", L: "#a7a9ac", NQRW: "#fccc0a", S: "#808183", SI: "#08179c", SS: "#08179c" };
@@ -1948,14 +2037,14 @@ async function trMapInit(d) {
   const py = (lat) => { const r = lat * Math.PI / 180; return TR_S * (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2; };
   TRM.proj = { px, py, st };
   const paths = {};
-  TRM.stop2cx = {};
-  for (const c of TR_ALL) for (const sid of c.stops || []) TRM.stop2cx[sid] = [c.lat, c.lon];
+  TRM.stop2cx = {}; TRM.stop2cxId = {};
+  for (const c of TR_ALL) for (const sid of c.stops || []) { TRM.stop2cx[sid] = [c.lat, c.lon]; TRM.stop2cxId[sid] = c.id; }
   for (const [a, b, g] of TRM.net.edges) {          // the real track between two stations when we have it, else a straight line
     const pts = trTrack(a, b);
     if (pts) (paths[g] ||= []).push("M" + pts.map((p) => `${px(p[1]).toFixed(1)} ${py(p[0]).toFixed(1)}`).join("L"));
   }
   const homes = TRM.home.map((id) => st[id]).filter(Boolean);
-  svg.innerHTML = `<g id="tr-tiles"></g><g id="tr-lines"></g><g id="tr-stations"></g><g id="tr-labels"></g><g id="tr-trains"></g>`;
+  svg.innerHTML = `<g id="tr-tiles"></g><g id="tr-lines"></g><g id="tr-route"></g><g id="tr-stations"></g><g id="tr-labels"></g><g id="tr-trains"></g>`;
   const GL = `<rect class="bg" x="-6" y="-6" width="12" height="12" rx="3"/><path class="gl" d="M-3.5-3.2h7v5.4h-7z"/><rect class="gw" x="-2.5" y="-2.3" width="5" height="2.2" rx=".4"/><circle class="gw" cx="-1.7" cy="1" r=".6"/><circle class="gw" cx="1.7" cy="1" r=".6"/><path class="gf" d="M-2.6 3.4-3.6 5M2.6 3.4 3.6 5"/>`;
   const order = [...TR_ALL].sort((a, b) => TRM.home.includes(a.id) - TRM.home.includes(b.id));
   $("tr-stations").innerHTML = order.map((x) => `<g class="sn${TRM.home.includes(x.id) ? " home" : ""}" data-id="${esc(x.id)}"><circle class="hit" r="11"/>${GL}</g>`).join("");
@@ -1969,6 +2058,7 @@ async function trMapInit(d) {
   trLoadMap();
   TRM.timer = setInterval(() => { if (!document.hidden && $("tr-map")) trLoadMap(); }, 15000);
   TRM.anim = setInterval(() => { if (!document.hidden) trTick(); }, 500);
+  if (TP.shown != null && TP.last) trDrawRoute(TP.last.options[TP.shown], false);   // page re-drawn: keep the picked trip
 }
 
 function trApplyView() {
@@ -1983,6 +2073,7 @@ function trApplyView() {
   const u = v.w / cw, k = ew > 600 ? 0.6 : ew > 260 ? 0.85 : 1.2;       // station icon: ~7 px zoomed out, ~14 px zoomed in
   trPlaceTrains(r, u, k);
   if (TRM.sn && (TRM.u !== u || TRM.k !== k)) { TRM.u = u; TRM.k = k; TRM.sn.forEach((n) => n.g.setAttribute("transform", `translate(${n.x.toFixed(2)} ${n.y.toFixed(2)}) scale(${(u * k).toFixed(4)})`)); }
+  document.querySelectorAll("#tr-route .rpin").forEach((c) => c.setAttribute("r", (7 * u).toFixed(3)));
   cancelAnimationFrame(TRM.raf); TRM.raf = requestAnimationFrame(() => { trTiles(); trPopPos(); });
 }
 
@@ -2112,6 +2203,7 @@ async function trLoadMap() {
       }
       n.firstChild.setAttribute("fill", RT_COL[t.route.replace(/X$/, "")] || "#808183");
       n.dataset.at = home ? t.at : "";
+      n.classList.toggle("onroute", !!TRM.routeTrips && TRM.routeTrips.has(t.id));
       n.dataset.g = trGroup(t.route);
       n.style.display = TRM.on.has(n.dataset.g) ? "" : "none";
     }
