@@ -1578,7 +1578,9 @@ const rtBadge = (r) => {
 };
 const trSaved = () => { try { const v = JSON.parse(store.get("trainStations") || "null"); return Array.isArray(v) && v.length ? v : null; } catch { return null; } };
 const trPath = () => { const v = trSaved(); return "/api/trains" + (v ? `?s=${encodeURIComponent(v.join(","))}` : ""); };
-let TR_ALL = null;   // every station, fetched once for the search box
+let TR_ALL = null;   // every station complex, fetched once (search box + map icons)
+let TR_STOPS = null; // platform-group id -> [lat, lon], for drawing the lines
+const trLoadStations = () => TR_ALL ? Promise.resolve() : api("/api/trains/stations").then((x) => { TR_ALL = x.stations; TR_STOPS = x.stops; });
 const trMin = (t) => { const m = Math.round((t - Date.now()) / 60000); return m <= 0 ? "Now" : `${m} min`; };
 const trRows = (list, n) => list.slice(0, n).map((a) => `<div class="trrow">${rtBadge(a.route)}<span class="to">${esc(a.to)}</span><span class="min${Math.round((a.t - Date.now()) / 60000) <= 2 ? " soon" : ""}">${trMin(a.t)}</span></div>`).join("")
   || `<p class="empty">No trains in the next hour.</p>`;
@@ -1625,7 +1627,7 @@ function renderTrains(d, quiet) {
   }
   $("tr-chips").innerHTML = trChips(d);
   $("tr-list").innerHTML = trList(d);
-  if (!TR_ALL) api("/api/trains/stations").then((x) => { TR_ALL = x.stations; }).catch(() => {});
+  trLoadStations().catch(() => {});
 }
 
 function trSetStations(ids) {
@@ -1667,8 +1669,8 @@ async function trMapInit(d) {
   TRM.home = d.stations.map((x) => x.id);
   $("tr-filters").innerHTML = TR_GROUPS.map(([g, label]) => `<button type="button" data-trg="${g}" aria-pressed="${TRM.on.has(g)}">${label.split(" ").map(rtBadge).join("")}</button>`).join("");
   try {
-    const [net, all] = await Promise.all([TRM.net || api("/api/trains/network"), TR_ALL ? { stations: TR_ALL } : api("/api/trains/stations")]);
-    TRM.net = net; TR_ALL = all.stations;
+    const [net] = await Promise.all([TRM.net || api("/api/trains/network"), trLoadStations()]);
+    TRM.net = net;
   } catch { $("tr-info").textContent = "The map couldn't load."; return; }
   if (!$("tr-map")) return;
   const st = Object.fromEntries(TR_ALL.map((x) => [x.id, x]));
@@ -1676,7 +1678,7 @@ async function trMapInit(d) {
   const py = (lat) => { const r = lat * Math.PI / 180; return TR_S * (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2; };
   TRM.proj = { px, py, st };
   const paths = {};
-  for (const [a, b, g] of TRM.net.edges) { if (st[a] && st[b]) (paths[g] ||= []).push(`M${px(st[a].lon).toFixed(1)} ${py(st[a].lat).toFixed(1)}L${px(st[b].lon).toFixed(1)} ${py(st[b].lat).toFixed(1)}`); }
+  for (const [a, b, g] of TRM.net.edges) { const A = TR_STOPS[a], B = TR_STOPS[b]; if (A && B) (paths[g] ||= []).push(`M${px(A[1]).toFixed(1)} ${py(A[0]).toFixed(1)}L${px(B[1]).toFixed(1)} ${py(B[0]).toFixed(1)}`); }
   const homes = TRM.home.map((id) => st[id]).filter(Boolean);
   svg.innerHTML = `<g id="tr-tiles"></g><g id="tr-lines"></g><g id="tr-stations"></g><g id="tr-labels"></g><g id="tr-trains"></g>`;
   const GL = `<rect class="bg" x="-6" y="-6" width="12" height="12" rx="3"/><path class="gl" d="M-3.5-3.2h7v5.4h-7z"/><rect class="gw" x="-2.5" y="-2.3" width="5" height="2.2" rx=".4"/><circle class="gw" cx="-1.7" cy="1" r=".6"/><circle class="gw" cx="1.7" cy="1" r=".6"/><path class="gf" d="M-2.6 3.4-3.6 5M2.6 3.4 3.6 5"/>`;
@@ -1728,33 +1730,28 @@ function trTiles() {
   TRM.tiles.forEach((im, k) => { if (!keep.has(k)) { im.remove(); TRM.tiles.delete(k); } });
 }
 
-function trLabels() {
-  const svg = $("tr-map"), v = TRM.view, L = $("tr-labels");
-  if (!svg || !v || !L || !TRM.sn) return;
-  if (v.w > 300) { L.textContent = ""; return; }            // zoomed out: icons only; zoom in and names appear
-  const cw = svg.clientWidth || 800, ch = svg.clientHeight || 520, u = v.w / cw, x0 = v.cx - v.w / 2, y0 = v.cy - (v.w * ch / cw) / 2;
-  const vis = TRM.sn.filter((n) => n.x > x0 - 150 * u && n.x < x0 + v.w + 10 * u && n.y > y0 - 10 * u && n.y < y0 + ch * u + 10 * u);
-  vis.sort((a, b) => (b.g.classList.contains("home") - a.g.classList.contains("home")) || ((b.s.routes || []).length - (a.s.routes || []).length));
-  const boxes = vis.map((n) => { const sx = (n.x - x0) / u, sy = (n.y - y0) / u; return { l: sx - 8, r: sx + 8, t: sy - 8, b: sy + 8 }; });
-  let out = "";
-  for (const n of vis) {
-    const sx = (n.x - x0) / u, sy = (n.y - y0) / u, w = n.s.name.length * 6.4 + 4;
-    const box = { l: sx + 10, r: sx + 10 + w, t: sy - 7, b: sy + 7 };
-    if (box.r < 0 || box.l > cw) continue;
-    if (boxes.some((o, i) => o !== boxes[vis.indexOf(n)] && box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t)) continue;
-    boxes.push(box);
-    out += `<text class="lb" x="${(n.x + 10 * u).toFixed(2)}" y="${(n.y + 4 * u).toFixed(2)}" font-size="${(11.5 * u).toFixed(3)}" stroke-width="${(3.2 * u).toFixed(3)}">${esc(n.s.name)}</text>`;
-  }
-  L.innerHTML = out;
+function trLabels() {                      // only the tapped station gets a name on the map
+  const L = $("tr-labels"), v = TRM.view, svg = $("tr-map");
+  if (!L || !v || !svg) return;
+  const n = TRM.selSt && TRM.sn && TRM.sn.find((x) => x.s.id === TRM.selSt);
+  if (!n) { L.textContent = ""; return; }
+  const u = v.w / (svg.clientWidth || 800);
+  L.innerHTML = `<text class="lb" x="${(n.x + 11 * u).toFixed(2)}" y="${(n.y + 4.5 * u).toFixed(2)}" font-size="${(12.5 * u).toFixed(3)}" stroke-width="${(3.4 * u).toFixed(3)}">${esc(n.s.name)}</text>`;
 }
 
-function trStationInfo(id) {
+async function trStationInfo(id) {
   const x = TRM.proj && TRM.proj.st[id];
   if (!x) return;
-  const lat = x.lat.toFixed(4), lon = x.lon.toFixed(4);
-  $("tr-info").innerHTML = `<strong>${esc(x.name)}</strong> ${(x.routes || []).map(rtBadge).join(" ")}<br>
-    <span class="note">${lat}, ${lon} · <a href="https://www.google.com/maps/search/?api=1&query=${lat},${lon}" target="_blank" rel="noopener">Open in Maps</a>${
-      detail && detail.stations && detail.stations.some((s) => s.id === id) ? "" : ` · <button type="button" class="btn" data-tradd="${esc(id)}">Show arrivals</button>`}</span>`;
+  const lat = x.lat.toFixed(4), lon = x.lon.toFixed(4), mine = detail && detail.stations && detail.stations.some((q) => q.id === id);
+  const head = `<strong>${esc(x.name)}</strong> ${(x.routes || []).map(rtBadge).join(" ")}<br>
+    <span class="note">${lat}, ${lon} · <a href="https://www.google.com/maps/search/?api=1&query=${lat},${lon}" target="_blank" rel="noopener">Open in Maps</a>${mine ? "" : ` · <button type="button" class="btn" data-tradd="${esc(id)}">Add to my stations</button>`}</span>`;
+  $("tr-info").innerHTML = `${head}<p class="note">Loading arrivals…</p>`;
+  try {
+    const d = await api(`/api/trains?s=${encodeURIComponent(id)}`);
+    if (TRM.selSt !== id) return;
+    const st = d.stations[0];
+    $("tr-info").innerHTML = `${head}${st ? `<div class="trcols"><div class="trcol"><h4>Uptown</h4>${trRows(st.north, 4)}</div><div class="trcol"><h4>Downtown</h4>${trRows(st.south, 4)}</div></div>` : ""}`;
+  } catch (e) { if (TRM.selSt === id) $("tr-info").innerHTML = `${head}<p class="note">Couldn't load arrivals: ${esc(e.message)}</p>`; }
 }
 
 async function trLoadMap() {
@@ -1810,12 +1807,13 @@ function trZoom(f, ax, ay) {
 
 (function trMapEvents() {
   const ptrs = new Map();
-  let moved = 0, pinch = 0;
+  let moved = 0, pinch = 0, downEl = null;
   document.addEventListener("pointerdown", (e) => {
     const svg = e.target.closest && e.target.closest("#tr-map");
     if (!svg) return;
     ptrs.set(e.pointerId, [e.clientX, e.clientY]); moved = 0; pinch = 0;
-    svg.setPointerCapture(e.pointerId);
+    if (!ptrs.size || ptrs.size === 1) downEl = e.target;
+    try { svg.setPointerCapture(e.pointerId); } catch {}
   });
   document.addEventListener("pointermove", (e) => {
     if (!ptrs.has(e.pointerId) || !TRM.view) return;
@@ -1836,10 +1834,10 @@ function trZoom(f, ax, ay) {
     if (!ptrs.has(e.pointerId)) return;
     ptrs.delete(e.pointerId); pinch = 0;
     if (!ptrs.size && moved < 6) {                     // a tap: pick the nearest train under the finger
-      const svg = $("tr-map"), g = e.target.closest && e.target.closest(".tg");
-      const sn = e.target.closest && e.target.closest(".sn");
-      if (g) { TRM.sel = TRM.sel === g.dataset.id ? null : g.dataset.id; TRM.selSt = null; trShowInfo(); }
-      else if (sn) { TRM.sel = null; TRM.selSt = TRM.selSt === sn.dataset.id ? null : sn.dataset.id; trShowInfo(); if (TRM.selSt) trStationInfo(TRM.selSt); }
+      const g = downEl && downEl.closest && downEl.closest(".tg");
+      const sn = downEl && downEl.closest && downEl.closest(".sn");
+      if (g) { TRM.sel = TRM.sel === g.dataset.id ? null : g.dataset.id; TRM.selSt = null; trShowInfo(); trLabels(); }
+      else if (sn) { TRM.sel = null; TRM.selSt = TRM.selSt === sn.dataset.id ? null : sn.dataset.id; trShowInfo(); trLabels(); if (TRM.selSt) trStationInfo(TRM.selSt); }
     }
   };
   document.addEventListener("pointerup", up);

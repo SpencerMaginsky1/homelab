@@ -5,7 +5,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 python3-cryptography systemd ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY app.py stations.json network.json index.html favicon.svg favicon.ico apple-touch-icon.png icon-192.png icon-512.png manifest.webmanifest ./
+COPY app.py stations.json network.json complexes.json index.html favicon.svg favicon.ico apple-touch-icon.png icon-192.png icon-512.png manifest.webmanifest ./
 COPY vendor/xterm.js vendor/xterm.css vendor/addon-fit.js ./vendor/
 USER 65534:65534
 EXPOSE 7576

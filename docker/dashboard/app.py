@@ -1331,6 +1331,15 @@ except OSError:
     STATIONS = {}
 
 
+try:
+    with open(os.path.join(HERE, "complexes.json")) as _f:
+        COMPLEXES = json.load(_f)
+except OSError:
+    COMPLEXES = []
+CX = {c["id"]: c for c in COMPLEXES}
+STOP2CX = {s: c["id"] for c in COMPLEXES for s in c["stops"]}
+
+
 def _pb(buf):
     """Minimal protobuf reader: yields (field number, value). Value is an int, or bytes for length-delimited fields."""
     i, n = 0, len(buf)
@@ -1484,6 +1493,8 @@ def station_name(stop_id):
 
 
 def trains_at(ids):
+    """Next trains at up to four station complexes. An id may be a complex ("c602") or a single platform group ("635");
+    a complex merges every platform group in it (all three Union Sq stations are one place)."""
     data = train_trips()
     now = time.time()
     try:
@@ -1491,22 +1502,27 @@ def trains_at(ids):
     except Exception as e:  # noqa: BLE001
         log(f"train alerts: {e}")
         alerts = []
+    cxs = []
+    for i in ids:
+        c = i if i in CX else STOP2CX.get(i)
+        if c and c not in cxs:
+            cxs.append(c)
     stations = []
-    for sid in ids:
-        st = STATIONS.get(sid)
-        if not st:
-            continue
+    for cid in cxs:
+        c = CX[cid]
+        stops = set(c["stops"])
         dirs = {"N": [], "S": []}
         routes = set()
         for tr in data["trips"]:
-            for i, (stop, t) in enumerate(tr["stops"]):
-                if stop[:-1] == sid and stop[-1] in dirs and now - 30 <= t <= now + 3600:
+            for stop, t in tr["stops"]:
+                if stop[:-1] in stops and stop[-1] in dirs and now - 30 <= t <= now + 3600:
                     dirs[stop[-1]].append({"route": tr["route"], "t": t * 1000, "to": station_name(tr["stops"][-1][0]), "trip": tr["id"]})
                     routes.add(tr["route"])
+                    break
         for d in dirs.values():
             d.sort(key=lambda a: a["t"])
-        mine = [a for a in alerts if routes & set(a["routes"]) or any(x[:-1] == sid or x == sid for x in a["stops"])]
-        stations.append({"id": sid, "name": st["name"], "lat": st["lat"], "lon": st["lon"], "routes": sorted(routes),
+        mine = [a for a in alerts if routes & set(a["routes"]) or any(x in stops or x[:-1] in stops for x in a["stops"])]
+        stations.append({"id": cid, "name": c["name"], "lat": c["lat"], "lon": c["lon"], "routes": sorted(routes, key=lambda r: (r.rstrip("X"), r)),
                          "north": dirs["N"][:8], "south": dirs["S"][:8], "alerts": mine[:6]})
     return {"now": int(now * 1000), "feed_at": data["at"] * 1000, "feeds_down": data["failed"], "stations": stations}
 
@@ -1577,7 +1593,7 @@ def trains_map():
 
 
 def trains_page(qs):
-    ids = [x for x in (qs.get("s", [""])[0] or ",".join(TRAIN_STATIONS)).split(",") if x in STATIONS][:4]
+    ids = [x for x in (qs.get("s", [""])[0] or ",".join(TRAIN_STATIONS)).split(",") if x in CX or x in STOP2CX][:4]
     return trains_at(ids)
 
 
@@ -1846,7 +1862,11 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/trains/network":
                 return self.send(200, {"edges": NETWORK["edges"]})
             if p == "/api/trains/stations":
-                return self.send(200, {"default": TRAIN_STATIONS, "stations": [dict(x, routes=STATION_ROUTES.get(x["id"], [])) for x in STATIONS.values()]})
+                return self.send(200, {"default": [STOP2CX.get(x, x) for x in TRAIN_STATIONS],
+                                       "stations": [{"id": c["id"], "name": c["name"], "lat": c["lat"], "lon": c["lon"], "stops": c["stops"],
+                                                     "routes": sorted({r for sid in c["stops"] for r in STATION_ROUTES.get(sid, [])}, key=lambda r: (r.rstrip("X"), r))}
+                                                    for c in COMPLEXES],
+                                       "stops": {k: [v["lat"], v["lon"]] for k, v in STATIONS.items()}})
             if p == "/api/terminal":
                 return self.send(200, terminal_status(self.cookie("dashsess")))
             if p == "/api/terminal/ws":
