@@ -564,7 +564,23 @@ a.rainrow:hover strong { color: var(--accent); }
 @media (max-width: 560px) { .trcols { grid-template-columns: 1fr; } }
 .trmapwrap { position: relative; margin-bottom: 18px; }
 .trmap { width: 100%; height: 520px; display: block; background: var(--sunk); border-radius: 10px; touch-action: none; cursor: grab; user-select: none; }
-@media (max-width: 700px) { .trmap { height: 62vh; } }
+.trmine { margin: 0 0 8px; font-size: 15px; }
+.trzoom button, .trfilters button, .trpop button { touch-action: manipulation; }
+@media (max-width: 700px) {
+  .trhead .note { display: none; }                       /* the map is the point on a phone: get it on screen */
+  .trhead { margin-bottom: 8px; }
+  .trmapwrap { padding: 10px 10px 8px; }
+  .trmapwrap .panel-head { margin-bottom: 6px; }
+  .trmap { height: 68vh; height: 68svh; border-radius: 8px; }
+  .trmapwrap .trfilters { flex-wrap: nowrap; overflow-x: auto; margin: 0 -10px 8px; padding: 0 10px 2px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .trmapwrap .trfilters::-webkit-scrollbar { display: none; }
+  .trmapwrap .trfilters button { flex: none; padding: 6px 10px; }
+  .trzoom button { width: 40px; height: 40px; font-size: 20px; }
+  .trinfo { font-size: 13px; }
+  .trrow .to { white-space: normal; }
+  .trrow .dir { display: block; }                        /* "Brooklyn-bound" on its own line instead of cut off */
+  .trpop { padding: 9px 10px 7px; }
+}
 .trmap .ln { fill: none; stroke-linecap: round; stroke-linejoin: round; opacity: .85; stroke-width: 2px; vector-effect: non-scaling-stroke; }
 .trmap image { pointer-events: none; }
 /* the gray lines (S shuttles, L) vanish on the gray basemap: draw them darker on the light map, lighter on the dark one,
@@ -1663,14 +1679,15 @@ function trChips(d) {
 function renderTrains(d, quiet) {
   if (!quiet || !$("tr-list")) {
     $("view-detail").innerHTML = `${crumb}
-      <div class="dhead"><div><h2>Trains</h2><p class="note">Live MTA subway arrivals. Updates about every 30 seconds.</p></div></div>
-      <div class="trmanage"><div id="tr-chips"></div><input id="tr-search" type="search" placeholder="Add a station (e.g. 33 St, Times Sq)" autocomplete="off"><div class="trresults" id="tr-results" hidden></div></div>
+      <div class="dhead trhead"><div><h2>Trains</h2><p class="note">Live MTA subway arrivals. Updates about every 30 seconds.</p></div></div>
       <section class="panel trmapwrap"><div class="panel-head"><h2>Live map</h2><span class="meta" id="tr-map-meta"></span></div>
         <div class="trfilters" id="tr-filters" role="group" aria-label="Show lines"></div>
         <div style="position:relative"><div class="trpop" id="tr-pop" hidden></div><svg class="trmap" id="tr-map" role="img" aria-label="Live map of subway trains"></svg>
           <span class="trattr">Map © <a href="https://www.esri.com" target="_blank" rel="noopener">Esri</a>, HERE, Garmin, OpenStreetMap contributors</span>
           <div class="trzoom"><button type="button" id="tr-zin" aria-label="Zoom in">+</button><button type="button" id="tr-zout" aria-label="Zoom out">−</button></div></div>
         <p class="trinfo note" id="tr-info">Tap a train or a station. Positions are estimated from the MTA's arrival times, so they are approximate.</p></section>
+      <h3 class="trmine">My stations</h3>
+      <div class="trmanage"><div id="tr-chips"></div><input id="tr-search" type="search" placeholder="Add a station (e.g. 33 St, Times Sq)" autocomplete="off"><div class="trresults" id="tr-results" hidden></div></div>
       <div id="tr-list"></div>`;
     trMapInit(d);
   }
@@ -1743,7 +1760,7 @@ async function trMapInit(d) {
   $("tr-lines").innerHTML = Object.entries(paths).map(([g, d2]) => `<path class="ln lc" data-g="${g}" d="${d2.join("")}"/>`).join("")
     + Object.entries(paths).map(([g, d2]) => `<path class="ln" data-g="${g}" stroke="${TR_GCOL[g]}" d="${d2.join("")}"/>`).join("");
   const c = homes[0] ? [px(homes[0].lon), py(homes[0].lat)] : [px(-73.98), py(40.75)];
-  TRM.view = { cx: c[0], cy: c[1], w: 240 };
+  TRM.view = { cx: c[0], cy: c[1], w: 240 * Math.min(1, (svg.clientWidth || 1100) / 1100) };   // same street scale on a phone as on a PC
   trApplyView(true);
   trLoadMap();
   TRM.timer = setInterval(() => { if (!document.hidden && $("tr-map")) trLoadMap(); }, 15000);
@@ -1755,10 +1772,11 @@ function trApplyView() {
   if (!svg || !v) return;
   const a = (svg.clientWidth || 800) / (svg.clientHeight || 520), h = v.w / a;
   svg.setAttribute("viewBox", `${v.cx - v.w / 2} ${v.cy - h / 2} ${v.w} ${h}`);
-  const cw = svg.clientWidth || 800, pxr = v.w > 600 ? 2.5 : v.w > 300 ? 3.5 : 5;   // dot radius in screen pixels, a bit larger when zoomed in
+  const cw = svg.clientWidth || 800, ew = v.w * 1100 / cw;   // ew: the zoom expressed as "how wide this view would be on a 1100 px map"
+  const pxr = ew > 600 ? 2.5 : ew > 300 ? 3.5 : 5;            // dot radius in screen pixels, a bit larger when zoomed in
   const r = pxr * v.w / cw;
   svg.style.setProperty("--tr", r.toFixed(2));
-  const u = v.w / cw, k = v.w > 600 ? 0.6 : v.w > 260 ? 0.85 : 1.2;       // station icon: ~7 px zoomed out, ~14 px zoomed in
+  const u = v.w / cw, k = ew > 600 ? 0.6 : ew > 260 ? 0.85 : 1.2;       // station icon: ~7 px zoomed out, ~14 px zoomed in
   trPlaceTrains(r, u, k);
   if (TRM.sn && (TRM.u !== u || TRM.k !== k)) { TRM.u = u; TRM.k = k; TRM.sn.forEach((n) => n.g.setAttribute("transform", `translate(${n.x.toFixed(2)} ${n.y.toFixed(2)}) scale(${(u * k).toFixed(4)})`)); }
   cancelAnimationFrame(TRM.raf); TRM.raf = requestAnimationFrame(() => { trTiles(); trPopPos(); });
@@ -1957,7 +1975,7 @@ function trStationNear(cx, cy) {               // the station whose icon is unde
   const svg = $("tr-map"), v = TRM.view;
   if (!svg || !v || !TRM.sn) return null;
   const r = svg.getBoundingClientRect(), u = v.w / r.width, x0 = v.cx - v.w / 2, y0 = v.cy - (v.w * r.height / r.width) / 2;
-  const reach = Math.max(11, 6 * (TRM.k || 1) + 6);
+  const reach = Math.max(TRM.touch ? 20 : 11, 6 * (TRM.k || 1) + 6);   // a fingertip needs more room than a mouse pointer
   let best = null, bd = reach;
   for (const n of TRM.sn) {
     const d = Math.hypot((n.x - x0) / u - (cx - r.left), (n.y - y0) / u - (cy - r.top));
@@ -1983,7 +2001,7 @@ function trZoom(f, ax, ay) {
     const svg = e.target.closest && e.target.closest("#tr-map");
     if (!svg) return;
     ptrs.set(e.pointerId, [e.clientX, e.clientY]); moved = 0; pinch = 0;
-    if (ptrs.size === 1) { downEl = e.target; downXY = [e.clientX, e.clientY]; }
+    if (ptrs.size === 1) { downEl = e.target; downXY = [e.clientX, e.clientY]; TRM.touch = e.pointerType === "touch"; }
     try { svg.setPointerCapture(e.pointerId); } catch {}
   });
   document.addEventListener("pointermove", (e) => {
@@ -2030,6 +2048,7 @@ function trZoom(f, ax, ay) {
     }
   });
   window.addEventListener("resize", () => trApplyView());
+  document.addEventListener("gesturestart", (e) => { if (e.target.closest && e.target.closest("#tr-map")) e.preventDefault(); });
 })();
 
 /* ---------- weather ---------- */
