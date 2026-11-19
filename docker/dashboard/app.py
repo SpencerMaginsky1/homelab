@@ -17,6 +17,8 @@ Serves:
   /api/minecraft            server status, settings, players, backups
   /api/weather              current conditions, 5-day forecast, next 24 hours
   /api/trains?s=632,631     next subway arrivals + alerts at up to 4 stations (MTA GTFS-realtime, no key)
+  /api/trains/map           every running train with an estimated position (all lines)
+  /api/trains/network       the line segments for the map
   /api/trains/stations      every station (id, name, lat, lon) + the default ones
   /api/console/log          the Minecraft log from a byte position (needs the console password)
   POST /api/console/login | logout | command   (command goes to the console bridge on the host)
@@ -1372,11 +1374,24 @@ def _mta_get(name):
 
 
 def _parse_trips(buf):
-    trips = []
+    trips, veh = [], {}
     for f, ent in _pb(buf):
         if f != 2:
             continue
         for ef, tu in _pb(ent):
+            if ef == 4:                                  # VehiclePosition: which trains are actually running right now
+                tid, status, vstop, ts = "", 2, "", 0
+                for vf, vv in _pb(tu):
+                    if vf == 1:
+                        for df, dv in _pb(vv):
+                            if df == 1:
+                                tid = dv.decode("utf-8", "replace")
+                    elif vf == 4: status = vv
+                    elif vf == 7: vstop = vv.decode("utf-8", "replace")
+                    elif vf == 5: ts = vv
+                if tid:
+                    veh[tid] = (status, vstop, ts)
+                continue
             if ef != 3:
                 continue
             route = trip_id = ""
@@ -1401,6 +1416,8 @@ def _parse_trips(buf):
                         stops.append((sid, t))
             if route and stops:
                 trips.append({"id": trip_id, "route": route, "stops": stops})
+    for t in trips:
+        t["veh"] = veh.get(t["id"])                      # None = scheduled but not started yet
     return trips
 
 
@@ -1492,6 +1509,62 @@ def trains_at(ids):
         stations.append({"id": sid, "name": st["name"], "lat": st["lat"], "lon": st["lon"], "routes": sorted(routes),
                          "north": dirs["N"][:8], "south": dirs["S"][:8], "alerts": mine[:6]})
     return {"now": int(now * 1000), "feed_at": data["at"] * 1000, "feeds_down": data["failed"], "stations": stations}
+
+
+try:
+    with open(os.path.join(HERE, "network.json")) as _f:
+        NETWORK = json.load(_f)
+except OSError:
+    NETWORK = {"edges": [], "pred": {}}
+
+
+def _km(a, b):
+    dy = (a["lat"] - b["lat"]) * 111.0
+    dx = (a["lon"] - b["lon"]) * 84.0
+    return (dx * dx + dy * dy) ** 0.5
+
+
+def trains_map():
+    """Every running train with an estimated position. The MTA gives times, not coordinates: a train is placed between
+    its previous and next station by how far through that gap the clock says it is (straight line between stations)."""
+    data = train_trips()
+    now = time.time()
+    out = []
+    for tr in data["trips"]:
+        if not tr["veh"]:
+            continue
+        stops = tr["stops"]
+        d = stops[0][0][-1:]
+        pred = NETWORK["pred"].get(tr["route"], {}).get(d, {})
+        i = next((k for k, (_, t) in enumerate(stops) if t >= now), len(stops))
+        if i >= len(stops):
+            a = b = STATIONS.get(stops[-1][0][:-1])
+            frac = 0.0
+        else:
+            b = STATIONS.get(stops[i][0][:-1])
+            if i > 0:
+                a = STATIONS.get(stops[i - 1][0][:-1])
+                span = stops[i][1] - stops[i - 1][1]
+                frac = (now - stops[i - 1][1]) / span if span > 0 else 1.0
+            else:
+                a = STATIONS.get(pred.get(stops[0][0][:-1], ""))
+                if a and b:
+                    seg = max(60.0, _km(a, b) / 0.0075)       # ~27 km/h average between stops
+                    frac = 1.0 - (stops[0][1] - now) / seg
+                else:
+                    a, frac = b, 0.0
+            if tr["veh"][0] == 1 and tr["veh"][1]:        # the feed says it is standing in a station
+                here = STATIONS.get(tr["veh"][1][:-1])
+                if here:
+                    a = b = here
+        if not a or not b:
+            continue
+        frac = max(0.0, min(1.0, frac))
+        nxt = stops[i] if i < len(stops) else stops[-1]
+        out.append({"id": tr["id"], "route": tr["route"], "dir": d,
+                    "lat": round(a["lat"] + (b["lat"] - a["lat"]) * frac, 5), "lon": round(a["lon"] + (b["lon"] - a["lon"]) * frac, 5),
+                    "to": station_name(stops[-1][0]), "next": station_name(nxt[0]), "eta": nxt[1] * 1000})
+    return {"now": int(now * 1000), "feeds_down": data["failed"], "trains": out}
 
 
 def trains_page(qs):
@@ -1759,6 +1832,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, forecast())
             if p == "/api/trains":
                 return self.send(200, trains_page(urllib.parse.parse_qs(u.query)))
+            if p == "/api/trains/map":
+                return self.send(200, trains_map())
+            if p == "/api/trains/network":
+                return self.send(200, {"edges": NETWORK["edges"]})
             if p == "/api/trains/stations":
                 return self.send(200, {"default": TRAIN_STATIONS, "stations": list(STATIONS.values())})
             if p == "/api/terminal":

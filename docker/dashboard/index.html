@@ -560,6 +560,22 @@ a.rainrow:hover strong { color: var(--accent); }
 .trresults button:first-child { border-top: 0; }
 .trresults button:hover { background: var(--accent-soft); }
 @media (max-width: 560px) { .trcols { grid-template-columns: 1fr; } }
+.trmapwrap { position: relative; margin-bottom: 18px; }
+.trmap { width: 100%; height: 520px; display: block; background: var(--sunk); border-radius: 10px; touch-action: none; cursor: grab; user-select: none; }
+@media (max-width: 700px) { .trmap { height: 62vh; } }
+.trmap .ln { fill: none; stroke-linecap: round; stroke-linejoin: round; opacity: .5; vector-effect: non-scaling-stroke; }
+.trmap .tg { transition: transform 14s linear; }
+.trmap .tg circle { stroke: var(--surface); vector-effect: non-scaling-stroke; stroke-width: 1px; cursor: pointer; }
+.trmap .tg.sel circle { stroke: var(--fg); stroke-width: 2px; }
+.trmap .st circle { fill: none; stroke: var(--fg); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+.trmap .st text { fill: var(--fg); font-size: 11px; font-weight: 600; paint-order: stroke; stroke: var(--sunk); stroke-width: 3px; }
+.trzoom { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.trzoom button { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); font-size: 18px; cursor: pointer; }
+.trfilters { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.trfilters button { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 4px 10px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; display: inline-flex; gap: 3px; align-items: center; }
+.trfilters button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.trfilters .rt { height: 17px; min-width: 17px; font-size: 10px; padding: 0 3px; }
+.trinfo { min-height: 1.4em; font-size: 13.5px; margin: 4px 0 0; }
 /* bottom tab bar: phones only */
 .tabbar { display: none; }
 @media (max-width: 700px) {
@@ -1562,7 +1578,7 @@ async function loadTrainsCard() {
     const st = d.stations[0];
     if (!st) { $("tr-home").innerHTML = `<p class="empty">Pick a station on the Trains page.</p>`; return; }
     $("tr-home-meta").textContent = st.name;
-    $("tr-home").innerHTML = `<div class="trcols"><div class="trcol"><h4>Northbound</h4>${trRows(st.north, 3)}</div><div class="trcol"><h4>Southbound</h4>${trRows(st.south, 3)}</div></div>`
+    $("tr-home").innerHTML = `<div class="trcols"><div class="trcol"><h4>Uptown</h4>${trRows(st.north, 3)}</div><div class="trcol"><h4>Downtown</h4>${trRows(st.south, 3)}</div></div>`
       + (st.alerts.length ? `<p class="note">⚠ ${st.alerts.length} service alert${st.alerts.length > 1 ? "s" : ""}</p>` : "")
       + (d.feeds_down ? `<p class="note">Some MTA feeds didn't answer, so a few lines may be missing.</p>` : "");
   } catch (e) {
@@ -1573,7 +1589,7 @@ async function loadTrainsCard() {
 function trList(d) {
   return d.stations.map((st) => `<section class="panel trstation">
     <h3>${esc(st.name)} ${st.routes.map(rtBadge).join("")}</h3>
-    <div class="trcols"><div class="trcol"><h4>Northbound</h4>${trRows(st.north, 6)}</div><div class="trcol"><h4>Southbound</h4>${trRows(st.south, 6)}</div></div>
+    <div class="trcols"><div class="trcol"><h4>Uptown</h4>${trRows(st.north, 6)}</div><div class="trcol"><h4>Downtown</h4>${trRows(st.south, 6)}</div></div>
     ${st.alerts.map((a) => `<details class="tralert"><summary>${a.routes.slice(0, 6).map(rtBadge).join(" ")} ${esc(a.header)}</summary>${a.desc ? `<p>${esc(a.desc)}</p>` : ""}</details>`).join("")}
   </section>`).join("") || `<p class="empty">Add a station above.</p>`;
 }
@@ -1587,7 +1603,13 @@ function renderTrains(d, quiet) {
     $("view-detail").innerHTML = `${crumb}
       <div class="dhead"><div><h2>Trains</h2><p class="note">Live MTA subway arrivals. Updates about every 30 seconds.</p></div></div>
       <div class="trmanage"><div id="tr-chips"></div><input id="tr-search" type="search" placeholder="Add a station (e.g. 33 St, Times Sq)" autocomplete="off"><div class="trresults" id="tr-results" hidden></div></div>
+      <section class="panel trmapwrap"><div class="panel-head"><h2>Live map</h2><span class="meta" id="tr-map-meta"></span></div>
+        <div class="trfilters" id="tr-filters" role="group" aria-label="Show lines"></div>
+        <div style="position:relative"><svg class="trmap" id="tr-map" role="img" aria-label="Live map of subway trains"></svg>
+          <div class="trzoom"><button type="button" id="tr-zin" aria-label="Zoom in">+</button><button type="button" id="tr-zout" aria-label="Zoom out">−</button></div></div>
+        <p class="trinfo note" id="tr-info">Tap a train. Positions are estimated from the MTA's arrival times, so they are approximate.</p></section>
       <div id="tr-list"></div>`;
+    trMapInit(d);
   }
   $("tr-chips").innerHTML = trChips(d);
   $("tr-list").innerHTML = trList(d);
@@ -1616,6 +1638,154 @@ document.addEventListener("click", (e) => {
   if (add) trSetStations([...cur.filter((i) => i !== add.dataset.tradd), add.dataset.tradd]);
   else trSetStations(cur.filter((i) => i !== del.dataset.trdel));
 });
+
+/* live map */
+const TR_GROUPS = [["123", "1 2 3"], ["456", "4 5 6"], ["7", "7"], ["ACE", "A C E"], ["BDFM", "B D F M"], ["G", "G"], ["JZ", "J Z"], ["L", "L"], ["NQRW", "N Q R W"], ["S", "S"], ["SI", "SIR"]];
+const TR_GCOL = { "123": "#ee352e", "456": "#00933c", "7": "#b933ad", ACE: "#0039a6", BDFM: "#ff6319", G: "#6cbe45", JZ: "#996633", L: "#a7a9ac", NQRW: "#fccc0a", S: "#808183", SI: "#08179c" };
+const trGroup = (r) => { const b = r.replace(/X$/, ""); return (TR_GROUPS.find(([g]) => g.includes(b)) || ["S"])[0]; };
+const TRM = { on: new Set(TR_GROUPS.map((g) => g[0])), timer: null, view: null, nodes: new Map(), proj: null, sel: null, last: null, net: null, home: [] };
+
+function stopTrMap() { clearInterval(TRM.timer); TRM.timer = null; TRM.nodes = new Map(); TRM.proj = null; }
+
+async function trMapInit(d) {
+  stopTrMap();
+  const svg = $("tr-map");
+  if (!svg) return;
+  TRM.home = d.stations.map((x) => x.id);
+  $("tr-filters").innerHTML = TR_GROUPS.map(([g, label]) => `<button type="button" data-trg="${g}" aria-pressed="${TRM.on.has(g)}">${label.split(" ").map(rtBadge).join("")}</button>`).join("");
+  try {
+    const [net, all] = await Promise.all([TRM.net || api("/api/trains/network"), TR_ALL ? { stations: TR_ALL } : api("/api/trains/stations")]);
+    TRM.net = net; TR_ALL = all.stations;
+  } catch { $("tr-info").textContent = "The map couldn't load."; return; }
+  if (!$("tr-map")) return;
+  const st = Object.fromEntries(TR_ALL.map((x) => [x.id, x]));
+  const lon0 = Math.min(...TR_ALL.map((x) => x.lon)), lat1 = Math.max(...TR_ALL.map((x) => x.lat)), K = 2400, cs = Math.cos(40.7 * Math.PI / 180);
+  const px = (lon) => (lon - lon0) * cs * K, py = (lat) => (lat1 - lat) * K;
+  TRM.proj = { px, py, st };
+  const paths = {};
+  for (const [a, b, g] of TRM.net.edges) { if (st[a] && st[b]) (paths[g] ||= []).push(`M${px(st[a].lon).toFixed(1)} ${py(st[a].lat).toFixed(1)}L${px(st[b].lon).toFixed(1)} ${py(st[b].lat).toFixed(1)}`); }
+  const homes = TRM.home.map((id) => st[id]).filter(Boolean);
+  svg.innerHTML = `<g id="tr-lines"></g><g id="tr-homes">${homes.map((h) => `<g class="st"><circle cx="${px(h.lon)}" cy="${py(h.lat)}" r="5"/><text x="${px(h.lon) + 8}" y="${py(h.lat) + 4}">${esc(h.name)}</text></g>`).join("")}</g><g id="tr-trains"></g>`;
+  $("tr-lines").innerHTML = Object.entries(paths).map(([g, d2]) => `<path class="ln" data-g="${g}" stroke="${TR_GCOL[g]}" d="${d2.join("")}"/>`).join("");
+  const c = homes[0] ? [px(homes[0].lon), py(homes[0].lat)] : [px(-73.98), py(40.75)];
+  TRM.view = { cx: c[0], cy: c[1], w: 240 };
+  trApplyView(true);
+  trLoadMap();
+  TRM.timer = setInterval(() => { if (!document.hidden && $("tr-map")) trLoadMap(); }, 15000);
+}
+
+function trApplyView() {
+  const svg = $("tr-map"), v = TRM.view;
+  if (!svg || !v) return;
+  const a = (svg.clientWidth || 800) / (svg.clientHeight || 520), h = v.w / a;
+  svg.setAttribute("viewBox", `${v.cx - v.w / 2} ${v.cy - h / 2} ${v.w} ${h}`);
+  const cw = svg.clientWidth || 800, pxr = v.w > 600 ? 2.5 : v.w > 300 ? 3.5 : 5;   // dot radius in screen pixels, a bit larger when zoomed in
+  const r = pxr * v.w / cw;
+  svg.style.setProperty("--tr", r.toFixed(2));
+  TRM.nodes.forEach((n) => n.firstChild.setAttribute("r", r.toFixed(2)));
+  document.querySelectorAll("#tr-homes circle").forEach((c) => c.setAttribute("r", (r * 1.8).toFixed(2)));
+  document.querySelectorAll("#tr-homes text").forEach((t) => { t.style.fontSize = `${(11 * v.w / (svg.clientWidth || 800)).toFixed(2)}px`; t.style.strokeWidth = `${(3 * v.w / (svg.clientWidth || 800)).toFixed(2)}px`; });
+}
+
+async function trLoadMap() {
+  try {
+    const m = await api("/api/trains/map");
+    if (!$("tr-map") || !TRM.proj) return;
+    TRM.last = m;
+    const { px, py } = TRM.proj, layer = $("tr-trains"), seen = new Set();
+    for (const t of m.trains) {
+      seen.add(t.id);
+      let n = TRM.nodes.get(t.id);
+      const x = px(t.lon), y = py(t.lat);
+      if (!n) {
+        n = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        n.setAttribute("class", "tg");
+        n.dataset.id = t.id;
+        n.style.transition = "none";
+        n.style.transform = `translate(${x}px, ${y}px)`;
+        const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        c.setAttribute("r", $("tr-map").style.getPropertyValue("--tr") || "2");
+        n.appendChild(c); layer.appendChild(n); TRM.nodes.set(t.id, n);
+        requestAnimationFrame(() => { n.style.transition = ""; });
+      } else n.style.transform = `translate(${x}px, ${y}px)`;
+      n.firstChild.setAttribute("fill", RT_COL[t.route.replace(/X$/, "")] || "#808183");
+      n.dataset.g = trGroup(t.route);
+      n.style.display = TRM.on.has(n.dataset.g) ? "" : "none";
+    }
+    TRM.nodes.forEach((n, id) => { if (!seen.has(id)) { n.remove(); TRM.nodes.delete(id); } });
+    $("tr-map-meta").textContent = `${m.trains.filter((t) => TRM.on.has(trGroup(t.route))).length} trains running${m.feeds_down ? " · some feeds missing" : ""}`;
+    trApplyView();
+    trShowInfo();
+  } catch (e) { $("tr-info") && ($("tr-info").textContent = `Couldn't load trains: ${e.message}`); }
+}
+
+function trShowInfo() {
+  document.querySelectorAll("#tr-trains .tg").forEach((n) => n.classList.toggle("sel", n.dataset.id === TRM.sel));
+  const t = TRM.last && TRM.last.trains.find((x) => x.id === TRM.sel);
+  if (!t) return;
+  const m = Math.round((t.eta - Date.now()) / 60000);
+  $("tr-info").innerHTML = `${rtBadge(t.route)} <strong>${esc(t.dir === "N" ? "Uptown" : "Downtown")}</strong> to ${esc(t.to)} · next stop <strong>${esc(t.next)}</strong> ${m <= 0 ? "now" : `in ${m} min`}`;
+}
+
+function trZoom(f, ax, ay) {
+  const v = TRM.view, svg = $("tr-map");
+  if (!v || !svg) return;
+  const w = Math.max(20, Math.min(1100, v.w * f)), r = svg.getBoundingClientRect(), a = r.width / r.height;
+  const fx = ax == null ? 0.5 : (ax - r.left) / r.width, fy = ay == null ? 0.5 : (ay - r.top) / r.height;
+  const h0 = v.w / a, h1 = w / a;
+  v.cx += (fx - 0.5) * (v.w - w); v.cy += (fy - 0.5) * (h0 - h1); v.w = w;
+  trApplyView();
+}
+
+(function trMapEvents() {
+  const ptrs = new Map();
+  let moved = 0, pinch = 0;
+  document.addEventListener("pointerdown", (e) => {
+    const svg = e.target.closest && e.target.closest("#tr-map");
+    if (!svg) return;
+    ptrs.set(e.pointerId, [e.clientX, e.clientY]); moved = 0; pinch = 0;
+    svg.setPointerCapture(e.pointerId);
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (!ptrs.has(e.pointerId) || !TRM.view) return;
+    const prev = ptrs.get(e.pointerId), svg = $("tr-map");
+    ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+    moved += Math.abs(e.clientX - prev[0]) + Math.abs(e.clientY - prev[1]);
+    if (ptrs.size === 2) {
+      const [p, q] = [...ptrs.values()], d = Math.hypot(p[0] - q[0], p[1] - q[1]);
+      if (pinch) trZoom(pinch / d, (p[0] + q[0]) / 2, (p[1] + q[1]) / 2);
+      pinch = d;
+    } else if (ptrs.size === 1 && svg) {
+      const u = TRM.view.w / svg.clientWidth;
+      TRM.view.cx -= (e.clientX - prev[0]) * u; TRM.view.cy -= (e.clientY - prev[1]) * u;
+      trApplyView();
+    }
+  });
+  const up = (e) => {
+    if (!ptrs.has(e.pointerId)) return;
+    ptrs.delete(e.pointerId); pinch = 0;
+    if (!ptrs.size && moved < 6) {                     // a tap: pick the nearest train under the finger
+      const svg = $("tr-map"), g = e.target.closest && e.target.closest(".tg");
+      if (g) { TRM.sel = TRM.sel === g.dataset.id ? null : g.dataset.id; trShowInfo(); }
+    }
+  };
+  document.addEventListener("pointerup", up);
+  document.addEventListener("pointercancel", up);
+  document.addEventListener("wheel", (e) => { if (e.target.closest && e.target.closest("#tr-map")) { e.preventDefault(); trZoom(e.deltaY > 0 ? 1.2 : 1 / 1.2, e.clientX, e.clientY); } }, { passive: false });
+  document.addEventListener("click", (e) => {
+    if (e.target.id === "tr-zin") trZoom(1 / 1.5);
+    else if (e.target.id === "tr-zout") trZoom(1.5);
+    const f = e.target.closest("[data-trg]");
+    if (f) {
+      const g = f.dataset.trg, all = TRM.on.size === TR_GROUPS.length;
+      if (all) { TRM.on = new Set([g]); } else if (TRM.on.has(g)) { TRM.on.delete(g); if (!TRM.on.size) TRM.on = new Set(TR_GROUPS.map((x) => x[0])); } else TRM.on.add(g);
+      document.querySelectorAll("#tr-filters button").forEach((b) => b.setAttribute("aria-pressed", String(TRM.on.has(b.dataset.trg))));
+      document.querySelectorAll("#tr-lines .ln").forEach((l) => { l.style.display = TRM.on.has(l.dataset.g) ? "" : "none"; });
+      TRM.nodes.forEach((n) => { n.style.display = TRM.on.has(n.dataset.g) ? "" : "none"; });
+    }
+  });
+  window.addEventListener("resize", () => trApplyView());
+})();
 
 /* ---------- weather ---------- */
 
@@ -1862,6 +2032,7 @@ function route() {
   detail = null;
   stopConsole();
   stopShell();
+  stopTrMap();
   closeSheet();
   const tab = !current ? "home" : current.type === "server" ? "server" : current.type === "minecraft" ? "minecraft" : current.type === "terminal" ? "terminal" : current.type === "trains" ? "trains"
     : current.type === "weather" || current.type === "weatherday" ? "weather"
