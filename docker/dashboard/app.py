@@ -1797,13 +1797,26 @@ def trip_plan(qs):
             continue
         sig = tuple((l["from_id"], l["to_id"]) for l in o["legs"] if l["type"] == "ride")   # same stations = same trip, 4 or 5 alike
         if sig in by_route:
-            later = by_route[sig].setdefault("later", [])
+            main = by_route[sig]
+            if o["arrive"] <= main["arrive"] and o["leave"] > main["leave"]:
+                # a later train that gets there just as early (N at 5:58 vs D at 5:56, both in at 6:23): lead with it
+                o["later"] = main.pop("later", [])
+                main.pop("later", None)
+                opts[opts.index(main)] = by_route[sig] = o
+                o, main = main, o
+            later = main.setdefault("later", [])
             first = next(l for l in o["legs"] if l["type"] == "ride")
-            if len(later) < 2:
+            main_first = next(l for l in main["legs"] if l["type"] == "ride")
+            dup = first["dep"] == main_first["dep"] or any(x["dep"] == first["dep"] for x in later)   # same first train, only a later connection
+            if len(later) < 2 and not dup:
                 later.append({"dep": first["dep"], "route": first["route"], "leave": o["leave"], "arrive": o["arrive"]})
+                later.sort(key=lambda x: x["dep"])
         elif len(opts) < 3:
             walked = lambda x: sum(l["min"] for l in x["legs"] if l["type"] in ("walk", "transfer") and (l["type"] == "walk" or l.get("walk")))
-            if opts and (o["arrive"] - opts[0]["arrive"] > 15 * 60000 or walked(o) > walked(opts[0]) + 8):
+            rides = lambda x: sum(1 for l in x["legs"] if l["type"] == "ride")
+            if opts and (o["arrive"] - opts[0]["arrive"] > 15 * 60000 or walked(o) > walked(opts[0]) + 8
+                         or (rides(o) > rides(opts[0]) and o["arrive"] - opts[0]["arrive"] > 2 * 60000)):
+                # much later, a lot more walking, or an extra change of trains that doesn't get you there sooner
                 continue                                # much later, or a lot more walking for no gain: not worth showing
             by_route[sig] = o
             opts.append(o)
