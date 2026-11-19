@@ -1586,9 +1586,11 @@ def trains_map():
             continue
         frac = max(0.0, min(1.0, frac))
         nxt = stops[i] if i < len(stops) else stops[-1]
+        here = a if a is b or frac <= 0.03 else b if frac >= 0.97 else None   # standing (or as good as) at a station
+        at = STOP2CX.get(here["id"]) if here else None
         out.append({"id": tr["id"], "route": tr["route"], "dir": d,
                     "lat": round(a["lat"] + (b["lat"] - a["lat"]) * frac, 5), "lon": round(a["lon"] + (b["lon"] - a["lon"]) * frac, 5),
-                    "to": station_name(stops[-1][0]), "next": station_name(nxt[0]), "eta": nxt[1] * 1000})
+                    "to": station_name(stops[-1][0]), "next": station_name(nxt[0]), "eta": nxt[1] * 1000, "at": at})
     return {"now": int(now * 1000), "feeds_down": data["failed"], "trains": out}
 
 
