@@ -580,7 +580,7 @@ a.rainrow:hover strong { color: var(--accent); }
 .trattr a { color: inherit; }
 .trmap .tg circle { stroke: var(--surface); vector-effect: non-scaling-stroke; stroke-width: 1px; cursor: pointer; }
 .trmap .tg.at { pointer-events: none; }
-.trmap .tg.at circle { stroke-width: 1.5px; }
+.trmap .tg.at circle { stroke-width: .75px; }
 .trmap .tg.sel circle { stroke: var(--fg); stroke-width: 2px; }
 .trmap .sn { cursor: pointer; }
 .trmap .sn .hit { fill: transparent; stroke: none; }
@@ -1768,12 +1768,12 @@ function trApplyView() {
 // (up to 8 around it, like notification dots). Offsets live on the circle, not the moving group, so zooming doesn't animate them.
 const TR_RIM = [-45, 45, -135, 135, 0, 180, -90, 90].map((d) => [Math.cos(d * Math.PI / 180), Math.sin(d * Math.PI / 180)]);
 function trPlaceTrains(r, u, k) {
-  const count = {}, rim = (6 * k + 1.5) * u;
+  const count = {}, rim = (6 * k + 0.5) * u;              // just outside the icon's edge
   TRM.nodes.forEach((n) => {
     const c = n.firstChild, at = n.dataset.at;
     if (at && n.style.display !== "none") {
       const i = (count[at] = (count[at] || 0) + 1) - 1, [dx, dy] = TR_RIM[i % 8];
-      c.setAttribute("cx", (dx * rim).toFixed(3)); c.setAttribute("cy", (dy * rim).toFixed(3)); c.setAttribute("r", (r * 0.78).toFixed(3));
+      c.setAttribute("cx", (dx * rim).toFixed(3)); c.setAttribute("cy", (dy * rim).toFixed(3)); c.setAttribute("r", (Math.max(1.6 * u, r * 0.5)).toFixed(3));   // half a moving dot, never under 1.6 px
       n.classList.add("at");
     } else {
       c.setAttribute("cx", "0"); c.setAttribute("cy", "0"); c.setAttribute("r", r.toFixed(3));
