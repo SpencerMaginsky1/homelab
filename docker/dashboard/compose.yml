@@ -6,6 +6,8 @@ networks:
       com.docker.network.bridge.name: br-dashboard   # fixed name in case ufw rules are ever needed
   dockerapi:
     internal: true                                   # only the dashboard can reach the proxy; no internet
+  trains:
+    external: true                                   # the trains app's network (~/Desktop/docker/trains): the Trains tab's calls go there
 
 services:
   dashboard:
@@ -13,7 +15,7 @@ services:
     image: homelab-dashboard:local
     container_name: dashboard
     restart: unless-stopped
-    networks: [dashboard, dockerapi]
+    networks: [dashboard, dockerapi, trains]
     ports:
       - "7576:7576"          # published by Docker, so LAN + tailnet reach it without a ufw rule (router doesn't forward it)
     group_add: ["4"]         # adm: lets journalctl read /var/log/journal
@@ -34,7 +36,8 @@ services:
       TZ: America/New_York
       LOCK_IDLE_MINUTES: "10"          # lock screen comes back after this long with no mouse/keyboard/touch
       HTTPS_URL: https://spencer-server.tailnet-name.ts.net   # tailscale serve address; browsers only share location over https
-      TRAIN_STATIONS: 632,631            # default subway stations on the Trains card/page: 33 St, Grand Central-42 St (station ids from stations.json)
+      TRAINS_URL: http://trains:8400     # the trains app; start it before the dashboard
+      TRAIN_STATIONS: 632,631            # default subway stations on the Trains card/page: 33 St, Grand Central-42 St (station ids from ../trains/stations.json)
       KASA_HOSTS: 192.168.1.184,192.168.1.185   # Desk Lamp, Couch Lamp (HS103); reserve these IPs in the router
     depends_on: [docker-proxy]
     read_only: true

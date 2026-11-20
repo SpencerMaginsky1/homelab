@@ -1,0 +1,28 @@
+# NYC subway trains web app (README 3.17): live arrivals, live map, trip planner. Public MTA feeds, no keys, no secrets.
+# The dashboard's Trains tab forwards its /api/trains* calls here over the "trains" network.
+networks:
+  trains:
+    name: trains             # fixed name: the dashboard's compose joins it as an external network
+
+services:
+  trains:
+    build: .
+    image: homelab-trains:local
+    container_name: trains
+    restart: unless-stopped
+    networks: [trains]
+    ports:
+      - "8400:8400"          # published by Docker, so LAN + tailnet reach it without a ufw rule (router doesn't forward it)
+    environment:
+      TZ: America/New_York
+      HTTPS_URL: https://spencer-server.tailnet-name.ts.net:8401   # tailscale serve address; phones only share location over https
+      TRAIN_STATIONS: 632,631            # default stations until you pick your own: 33 St, Grand Central-42 St (ids from stations.json)
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    healthcheck:             # web server only; Uptime Kuma watches the MTA feeds via /health
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8400/ping"]
+      interval: 60s
+      timeout: 5s
+      retries: 3

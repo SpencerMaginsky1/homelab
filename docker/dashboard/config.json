@@ -31,6 +31,11 @@
       "monitor": "Tidehold"
     },
     {
+      "name": "NYC Trains",
+      "port": 8400,
+      "monitor": "Trains"
+    },
+    {
       "name": "Plex",
       "port": 32400,
       "path": "/web",

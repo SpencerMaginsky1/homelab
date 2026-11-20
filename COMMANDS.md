@@ -174,6 +174,7 @@ Stacks live in `~/Desktop/docker/`.
 | Beszel | `~/Desktop/docker/beszel` | http://192.168.1.179:8090 |
 | Dawarich | `~/Desktop/docker` (project `docker`) | http://192.168.1.179:3000 |
 | Ship Tracker | `~/Desktop/docker/ships` | http://192.168.1.179:8100 |
+| Trains (NYC subway app) | `~/Desktop/docker/trains` | http://192.168.1.179:8400 · https://spencer-server.tailnet-name.ts.net:8401 (once `tailscale serve --https=8401` is on). Start it before the dashboard, whose Trains tab calls it |
 
 ```bash
 cd ~/Desktop/docker/<folder>
