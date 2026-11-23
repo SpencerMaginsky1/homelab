@@ -38,7 +38,7 @@ services:
       HTTPS_URL: https://spencer-server.tailnet-name.ts.net   # tailscale serve address; browsers only share location over https
       TRAINS_URL: http://trains:8400     # the trains app; start it before the dashboard
       TRAIN_STATIONS: 632,631            # default subway stations on the Trains card/page: 33 St, Grand Central-42 St (station ids from ../trains/stations.json)
-      KASA_HOSTS: 192.168.1.184,192.168.1.185   # Desk Lamp, Couch Lamp (HS103); reserve these IPs in the router
+      KASA_HOSTS: 192.168.1.184,192.168.1.185,192.168.1.187   # Desk Lamp, Couch Lamp, Christmas lights (HS103); reserve these IPs in the router
     depends_on: [docker-proxy]
     read_only: true
     cap_drop: [ALL]
