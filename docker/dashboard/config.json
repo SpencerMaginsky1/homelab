@@ -36,6 +36,11 @@
       "monitor": "Trains"
     },
     {
+      "name": "Immich",
+      "port": 2283,
+      "monitor": "Immich"
+    },
+    {
       "name": "Plex",
       "port": 32400,
       "path": "/web",
@@ -67,6 +72,21 @@
       "name": "Hunt Dashboard",
       "glyph": "HD",
       "url": "https://hunt.rx3productions.com/dashboard/"
+    },
+    {
+      "name": "MET Upload",
+      "glyph": "MU",
+      "url": "https://met.rx3productions.com/"
+    },
+    {
+      "name": "MET Review",
+      "glyph": "MR",
+      "url": "https://met.rx3productions.com/review/"
+    },
+    {
+      "name": "MET Check",
+      "glyph": "MC",
+      "url": "https://met.rx3productions.com/check/"
     },
     {
       "name": "Seerr",

@@ -15,7 +15,7 @@ services:
     volumes:
       - ./beszel_socket:/beszel_socket
       - /var/run/docker.sock:/var/run/docker.sock:ro   # per-container CPU/RAM
-      - /mnt/storage:/extra-filesystems/sda1__Storage:ro   # 8TB drive usage + I/O (dashboard Storage meter); "sda1" = device, after "__" = label
+      - /mnt/storage:/extra-filesystems/sda1__Storage:ro,rslave   # 8TB drive usage + I/O (dashboard Storage meter); "sda1" = device, after "__" = label
     environment:
       LISTEN: /beszel_socket/beszel.sock   # hub talks to agent over this socket; no TCP port opened
       KEY: ${BESZEL_KEY}                   # hub public key, set in .env
