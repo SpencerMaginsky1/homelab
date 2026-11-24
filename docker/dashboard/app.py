@@ -199,6 +199,8 @@ def beszel_systems():
                     "updated": utc_ms(r["updated"]), "uptime": info.get("u"),
                     "cpu": st.get("cpu", info.get("cpu")), "ram": [st.get("mu"), st.get("m")], "cache": st.get("mb"),
                     "swap": [st.get("su"), st.get("s")], "disk": [st.get("du"), st.get("d")],
+                    # extra drives from the Beszel agent's EXTRA_FILESYSTEMS (the 8TB drive is "Storage"), GB used / total
+                    "drives": [{"name": k, "used": v.get("du"), "total": v.get("d")} for k, v in (st.get("efs") or {}).items()],
                     "temp": t.get(tk[0]) if tk else None, "temp_name": temp_name(tk[0]) if tk else None,
                     "load": st.get("la") or info.get("la"),
                     "nics": [{"name": k, "up": v[0], "down": v[1], "total_up": v[2] if len(v) > 2 else None,

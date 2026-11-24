@@ -18,6 +18,7 @@ The homelab's own tools (everything else here is standard Linux, Docker or Tails
 | `homelab-updater` | Backs up, updates, health-checks and auto-rolls back Kuma, Beszel, Dawarich, Minecraft, Plex and GolfApp. Runs at 04:00 | `sudo homelab-updater status` · `apply <svc>` | §5 |
 | `homelab-rollback` | Undoes the last update of a service and holds it there | `sudo homelab-rollback <svc>` | §5 |
 | `mc-backup` | Minecraft world backups (restic) with player warnings. Runs at 03:30 | `sudo mc-backup list` · `restore latest` | §6 |
+| `homelab-backup` | Full-server backup to the 8TB drive (restic) + second copy of the Minecraft backups. Runs at 05:00 | `sudo homelab-backup list` · `restore latest <path>` · `mount` | README 3.18 |
 | `duckdns-update` | Points `example.duckdns.org` at the home IP. Runs every 5 min | `sudo duckdns-update` | §8 |
 | `golf-serve` | The GolfApp web server behind `homelab-golf.service` (hides `.git`, no folder listings). Not run by hand | `systemctl status homelab-golf` | §13 |
 | `~/Desktop/Claude/github/sync-repos.sh` | Copies the docs and configs to the `homelab` (public, sanitized) and `homelab-private` GitHub repos | `… sync-repos.sh` (preview) · `--push "message"` | README (top) |

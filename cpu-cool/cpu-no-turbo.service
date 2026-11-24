@@ -1,0 +1,11 @@
+[Unit]
+Description=Keep the i7-4790K at its 4.0 GHz base clock (turbo off): stock Intel cooler, throttled at 100 C on 2026-11-23
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo'
+ExecStop=/bin/sh -c 'echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo'
+
+[Install]
+WantedBy=multi-user.target

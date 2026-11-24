@@ -1,0 +1,10 @@
+[Unit]
+Description=Full-server backup to the 8TB drive (restic) + Minecraft backup copy
+After=network-online.target docker.service homelab-updater.service mc-backup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/homelab-backup backup
+TimeoutStartSec=3h
+Nice=10
+IOSchedulingClass=idle

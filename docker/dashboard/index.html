@@ -918,6 +918,12 @@ async function api(path) {
 const n1 = (v) => (v == null ? "–" : v < 10 ? v.toFixed(1) : v.toFixed(0));
 const fmtPct = (v) => (v == null ? "–" : `${v < 1 ? v.toFixed(2) : n1(v)}%`);
 const fmtGB = (v) => (v == null ? "–" : `${n1(v)} GB`);
+// big drives in TB, same "used / total" style as the Disk row (e.g. "0.0 / 7.4 TB")
+const tb = (d) => d.total >= 1000;
+const driveAmt = (d, gb) => (tb(d) ? n1(gb / 1000) : n1(gb));
+const driveUnit = (d) => (tb(d) ? "TB" : "GB");
+const drivePct = (d) => (d.total ? (d.used / d.total) * 100 : 0);
+const driveMeter = (d) => meter(d.name, drivePct(d), `${driveAmt(d, d.used)} / ${driveAmt(d, d.total)} ${driveUnit(d)}`, level(drivePct(d), 85, 95));
 const fmtMB = (v) => (v == null ? "–" : v >= 1024 ? `${(v / 1024).toFixed(2)} GB` : `${v.toFixed(v < 10 ? 1 : 0)} MB`);
 const fmtMs = (v) => (v == null ? "–" : `${v < 10 ? v.toFixed(1) : Math.round(v)} ms`);
 const fmtUptime = (v) => (v == null ? "–" : v === 100 ? "100%" : `${v.toFixed(2)}%`);
@@ -1098,6 +1104,7 @@ function renderHome() {
         ${meter("CPU", m.cpu, fmtPct(m.cpu), level(m.cpu))}
         ${meter("RAM", ramPct, `${n1(m.ram[0])} / ${n1(m.ram[1])} GB`, level(ramPct, 80, 92))}
         ${meter("Disk", diskPct, `${n1(m.disk[0])} / ${Math.round(m.disk[1])} GB`, level(diskPct, 80, 92))}
+        ${(m.drives || []).map(driveMeter).join("")}
         ${m.temp != null ? meter("Temp", (m.temp / 90) * 100, `${Math.round(m.temp)} °C`, level(m.temp, 70, 82)) : ""}
       </div>
       <div class="spark"><div class="k"><span>CPU, last hour</span><span class="num">up ${fmtDur(m.uptime)}</span></div>${spark(m.spark)}</div>
@@ -1302,6 +1309,7 @@ function renderServer(m) {
       ${tile("CPU", fmtPct(m.cpu), `${m.threads} threads`, level(m.cpu))}
       ${tile("Memory", fmtGB(m.ram[0]), `of ${fmtGB(m.ram[1])} · ${ramPct.toFixed(0)}%${m.swap[1] ? ` · swap ${n1(m.swap[0] || 0)} of ${n1(m.swap[1])} GB` : ""}`, level(ramPct, 80, 92))}
       ${tile("Disk", fmtGB(m.disk[0]), `of ${Math.round(m.disk[1])} GB · ${diskPct.toFixed(0)}%`, level(diskPct, 80, 92))}
+      ${(m.drives || []).map((d) => tile(d.name, `${driveAmt(d, d.used)} ${driveUnit(d)}`, `of ${driveAmt(d, d.total)} ${driveUnit(d)} · ${drivePct(d).toFixed(0)}%`, level(drivePct(d), 85, 95))).join("")}
       ${tile("Temperature", m.temp != null ? `${Math.round(m.temp)} °C` : "–", m.temp_name || "no sensor", level(m.temp ?? 0, 70, 82))}
       ${tile("Load", la[0] != null ? la[0].toFixed(2) : "–", la.length ? `${la[1].toFixed(2)} · ${la[2].toFixed(2)} (5 / 15 min)` : "", level(((la[0] || 0) / (m.threads || 1)) * 100))}
       ${tile("Uptime", fmtDur(m.uptime), m.uptime ? `since ${new Date(Date.now() - m.uptime * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "")}
@@ -1318,7 +1326,7 @@ function renderServer(m) {
       <div class="stack span-5">
         <section class="panel">
           <div class="panel-head"><h3>Disk</h3></div>
-          <div class="meters">${meter("/", diskPct, `${n1(m.disk[0])} / ${Math.round(m.disk[1])} GB`, level(diskPct, 80, 92))}</div>
+          <div class="meters">${meter("/", diskPct, `${n1(m.disk[0])} / ${Math.round(m.disk[1])} GB`, level(diskPct, 80, 92))}${(m.drives || []).map(driveMeter).join("")}</div>
         </section>
         <section class="panel">
           <div class="panel-head"><h3>Network interfaces</h3><span class="meta">right now · since boot</span></div>

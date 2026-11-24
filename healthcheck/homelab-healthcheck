@@ -16,6 +16,8 @@ CONF=/etc/homelab-healthcheck.conf
 : "${LAN_IF:=enp2s0}"
 : "${LAN_GW:=192.168.1.1}"
 : "${SYS_DISK:=/dev/disk/by-id/ata-PNY_CS900_500GB_SSD_SERIAL123456}"
+: "${STORAGE_DISK:=/dev/disk/by-id/ata-ST8000DM004-2U9188_ZR16NCRZ}"
+: "${STORAGE_MNT:=/mnt/storage}"
 : "${CLAUDE_USER:=spencer}"
 : "${CLAUDE_BIN:=/home/spencer/.local/bin/claude}"
 : "${README:=/home/spencer/Desktop/Claude/README.md}"
@@ -67,6 +69,23 @@ if [[ -e $SYS_DISK ]]; then
   fi
 else
   warn "System disk $SYS_DISK not found for SMART check"
+fi
+
+# ---------------- 8TB storage drive ----------------
+if mountpoint -q "$STORAGE_MNT"; then
+  st_pct=$(df --output=pcent "$STORAGE_MNT" | tail -1 | tr -dc 0-9)
+  st_free=$(df -h --output=avail "$STORAGE_MNT" | tail -1 | tr -d ' ')
+  if   (( st_pct > 95 )); then fail "Storage drive ${st_pct}% full (${st_free} free)"
+  elif (( st_pct > 85 )); then warn "Storage drive ${st_pct}% full (${st_free} free)"
+  else ok "Storage ${st_pct}% (${st_free} free)"; fi
+  smart=$(smartctl -H -A "$STORAGE_DISK" 2>/dev/null)
+  if ! grep -qE 'PASSED|OK' <<<"$smart"; then fail "Storage drive SMART health is not PASSED"
+  else
+    realloc=$(awk '$1==5 {print $10}' <<<"$smart"); pending=$(awk '$1==197 {print $10}' <<<"$smart")
+    (( ${realloc:-0} > 0 || ${pending:-0} > 0 )) && warn "Storage drive: ${realloc:-0} reallocated / ${pending:-0} pending sectors"
+  fi
+elif grep -q " $STORAGE_MNT " /etc/fstab; then
+  fail "Storage drive is NOT mounted at $STORAGE_MNT (Immich, MET app and backups are down; check: lsblk, sudo mount $STORAGE_MNT)"
 fi
 
 up_s=$(cut -d. -f1 /proc/uptime)
@@ -177,6 +196,17 @@ elif systemctl is-enabled -q mc-backup.timer 2>/dev/null; then
   fail "Minecraft backup has never succeeded (journalctl -t mc-backup)"
 fi
 
+# ---------------- Full-server backup ----------------
+if [[ -r /var/lib/homelab-backup/last-success ]]; then
+  srvb_age_h=$(( ( $(date +%s) - $(cat /var/lib/homelab-backup/last-success) ) / 3600 ))
+  srvb_sum=$(cat /var/lib/homelab-backup/summary 2>/dev/null)
+  if   (( srvb_age_h > 72 )); then fail "Server backup is ${srvb_age_h}h old (journalctl -t homelab-backup)"
+  elif (( srvb_age_h > 26 )); then warn "Server backup is ${srvb_age_h}h old - last night's run didn't succeed (journalctl -t homelab-backup)"
+  else ok "Server backup ${srvb_age_h}h ago (${srvb_sum})"; fi
+elif systemctl is-enabled -q homelab-backup.timer 2>/dev/null; then
+  fail "Server backup has never succeeded (journalctl -t homelab-backup)"
+fi
+
 # ---------------- Updater activity ----------------
 UPD_STATE=/var/lib/homelab-updater
 up_log=$(awk -F'|' -v c=$(( $(date +%s) - 86400 )) '$1 > c { sub(/^[0-9]+\|/, ""); print }' "$UPD_STATE/history.log" 2>/dev/null)
@@ -197,7 +227,8 @@ n_fail=${#FAILS[@]}; n_warn=${#WARNS[@]}
 stats="Disk ${disk_pct}% · RAM $(awk "BEGIN{printf \"%.1f\", $mem_avail_mb/1024}")G free · CPU ${cpu_temp}°C · load ${load15}
 Exit: ${pub_ip:-?} · Home: ${home_ip:-?} · ${running:-?}/${total:-?} containers · Kuma ${kuma_total:-?} monitors
 Uptime ${uptime_h} · ${updates} package updates available${up_done:+ · updated: $up_done}
-MC backup: ${mcb_age_h:-?}h ago · ${mcb_sum:-no data}"
+MC backup: ${mcb_age_h:-?}h ago · ${mcb_sum:-no data}
+Server backup: ${srvb_age_h:-?}h ago · ${srvb_sum:-no data} · Storage ${st_pct:-?}% (${st_free:-?} free)"
 
 # Phone-friendly version of the same numbers (the raw $stats above is what Claude reads)
 plural() { (( $1 == 1 )) && echo "$1 $2" || echo "$1 ${2}s"; }
@@ -215,7 +246,8 @@ else mc_bk="no Minecraft backup found"; fi
 pretty="🖥️ Server: up $up_human · disk ${disk_pct}% full · $(awk "BEGIN{printf \"%.1f\", $mem_avail_mb/1024}") GB RAM free · CPU ${cpu_temp}°C, ${cpu_busy}% busy
 🌐 Internet: $net
 🧩 Apps: ${running:-?} of ${total:-?} containers running · ${kuma_up} of ${kuma_total:-?} Uptime Kuma checks up · Minecraft $( (( mc_up )) && echo up || echo DOWN)
-💾 Backups: $mc_bk
+💾 Backups: $mc_bk${srvb_age_h:+ · whole server saved $(plural "$srvb_age_h" hour) ago}
+🗄️ 8TB drive: ${st_pct:-?}% full, ${st_free:-?} free
 🆙 Updated overnight: ${up_done:-nothing needed}
 📦 Ubuntu: $( (( updates )) && echo "$(plural "$updates" "package update") available" || echo "up to date")"
 

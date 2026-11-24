@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# homelab-backup - nightly full-server backup of Spencer-Server to the 8TB drive (restic), plus a second
+# copy of the Minecraft world backups. Plan: README 3.18. Run by homelab-backup.timer at 05:00.
+#
+#   homelab-backup                         back up now: dump databases, snapshot, retention, size budget,
+#                                          then copy mc-backup's snapshots to the drive (same as `backup`)
+#   homelab-backup list                    restore points of the server backup
+#   homelab-backup restore <ID|latest> <path> [target]
+#                                          restore one file/folder into target (default /var/tmp/homelab-restore-<time>);
+#                                          never writes over the live system
+#   homelab-backup mount [dir]             browse every snapshot as folders (default /mnt/restic; Ctrl-C to stop)
+#   homelab-backup stats                   repository sizes (server + Minecraft copy)
+#   homelab-backup check                   full integrity check of both repositories
+#
+# Repositories (root only, on /mnt/storage):
+#   server:    /mnt/storage/backups/server     password /etc/homelab-backup.pass  (keep a copy in a password manager!)
+#   minecraft: /mnt/storage/backups/minecraft  password /etc/mc-backup.pass       (restic copy of /var/backups/minecraft-restic)
+set -uo pipefail
+
+CONF=/etc/homelab-backup.conf
+[[ -r $CONF ]] && source "$CONF"
+[[ -r /etc/homelab-healthcheck.conf ]] && source /etc/homelab-healthcheck.conf   # NTFY_URL
+: "${NTFY_URL:=}" "${MOUNT:=/mnt/storage}" "${BUDGET_GB:=100}"
+: "${REPO:=$MOUNT/backups/server}" "${PASS:=/etc/homelab-backup.pass}"
+: "${MC_SRC:=/var/backups/minecraft-restic}" "${MC_REPO:=$MOUNT/backups/minecraft}" "${MC_PASS:=/etc/mc-backup.pass}"
+STATE=/var/lib/homelab-backup
+STAGE=$STATE/staging
+KEEP=(--keep-daily 7 --keep-weekly 4 --keep-monthly 12)
+MC_KEEP=(--keep-daily 30 --keep-weekly 12 --keep-monthly 24)   # longer than the SSD copy: the drive has room
+MIN_KEEP=7                                                     # the size budget never trims below this many snapshots
+
+[[ $EUID -eq 0 ]] || { echo "run with sudo"; exit 1; }
+mkdir -p "$STATE"
+exec 7>"$STATE/.lock"; flock -n 7 || { echo "another homelab-backup is running"; exit 1; }
+
+log()    { logger -t homelab-backup "$*" 2>/dev/null; [[ -t 1 ]] && echo "$*"; true; }
+notify() { [[ -n $NTFY_URL ]] && curl -s -m 20 -o /dev/null -H "Title: $1" -H "Priority: $2" -H "Tags: $3" --data-binary "$4" "$NTFY_URL"; true; }
+fail()   { log "FAILED: $1"; notify "🚨 Server backup failed" 5 rotating_light "$1
+Check: journalctl -t homelab-backup -n 40"; exit 1; }
+srv()    { RESTIC_REPOSITORY=$REPO RESTIC_PASSWORD_FILE=$PASS restic "$@"; }
+mc()     { RESTIC_REPOSITORY=$MC_REPO RESTIC_PASSWORD_FILE=$MC_PASS restic "$@"; }
+gib()    { numfmt --to=iec --suffix=B "${1:-0}" 2>/dev/null || echo "$1"; }
+size_of(){ "$1" stats --mode raw-data --json 2>/dev/null | jq -r '.total_size // 0'; }
+mounted(){ mountpoint -q "$MOUNT" && [[ -d $MOUNT/backups ]]; }
+
+# Consistent copy of a live SQLite database (the backup API is safe while the app is writing).
+sqlite_copy() {  # src dest
+  [[ -f $1 ]] || return 0
+  python3 -I -c 'import sqlite3,sys; s=sqlite3.connect(sys.argv[1]); d=sqlite3.connect(sys.argv[2]); s.backup(d); d.close(); s.close()' "$1" "$2" \
+    || log "warning: sqlite copy of $1 failed"
+}
+
+stage() {  # databases and package lists, written just before each snapshot
+  rm -rf "$STAGE"; install -d -m 700 "$STAGE"/{db,packages}
+  if docker ps --format '{{.Names}}' | grep -qx dawarich_db; then
+    docker exec dawarich_db sh -c 'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' > "$STAGE/db/dawarich.dump" 2>/dev/null \
+      && [[ -s $STAGE/db/dawarich.dump ]] || fail "pg_dump of Dawarich failed"
+  else log "warning: dawarich_db not running, no Dawarich dump this time"; fi
+  if docker ps --format '{{.Names}}' | grep -qx immich_postgres; then
+    docker exec immich_postgres pg_dumpall --clean --if-exists --username=postgres 2>/dev/null | gzip > "$STAGE/db/immich.sql.gz"
+    [[ $(gzip -cd "$STAGE/db/immich.sql.gz" 2>/dev/null | head -c 100 | wc -c) -gt 0 ]] || fail "pg_dumpall of Immich failed"
+  fi
+  sqlite_copy /home/spencer/Desktop/docker/uptime-kuma/data/kuma.db           "$STAGE/db/kuma.db"
+  sqlite_copy /home/spencer/Desktop/docker/beszel/beszel_data/data.db         "$STAGE/db/beszel-data.db"
+  sqlite_copy /home/spencer/Desktop/docker/beszel/beszel_data/auxiliary.db    "$STAGE/db/beszel-auxiliary.db"
+  sqlite_copy /home/spencer/repos/AR-Infrastructure/crowd-sourced-scavenger-hunt/server/data/hunt.db "$STAGE/db/hunt.db"
+  apt-mark showmanual            > "$STAGE/packages/apt-manual.txt"
+  dpkg --get-selections          > "$STAGE/packages/dpkg-selections.txt"
+  snap list                      > "$STAGE/packages/snap-list.txt" 2>/dev/null
+  crontab -l -u spencer          > "$STAGE/packages/crontab-spencer.txt" 2>/dev/null
+  crontab -l                     > "$STAGE/packages/crontab-root.txt" 2>/dev/null
+  docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}' > "$STAGE/packages/containers.txt"
+  lsblk -f > "$STAGE/packages/lsblk.txt"; uname -r > "$STAGE/packages/kernel.txt"
+  true
+}
+
+enforce_budget() {  # drop the oldest snapshots (beyond MIN_KEEP) until the repo is under BUDGET_GB
+  local budget=$(( BUDGET_GB * 1024 * 1024 * 1024 )) size n oldest trimmed=0
+  size=$(size_of srv)
+  while (( size > budget )); do
+    n=$(srv snapshots --json 2>/dev/null | jq length)
+    (( n > MIN_KEEP )) || break
+    oldest=$(srv snapshots --json 2>/dev/null | jq -r 'sort_by(.time)[0].short_id')
+    srv forget "$oldest" >/dev/null 2>&1 && srv prune >/dev/null 2>&1 || break
+    trimmed=$((trimmed + 1)); size=$(size_of srv)
+  done
+  if (( trimmed )); then
+    log "size budget: removed $trimmed oldest snapshot(s), now $(gib "$size") of ${BUDGET_GB}G"
+    notify "⚠️ Server backup over budget" 4 warning "Removed the $trimmed oldest restore point(s) to stay under ${BUDGET_GB} GB (now $(gib "$size")). Raise BUDGET_GB in $CONF if the server has grown."
+  fi
+  if (( size > budget )); then
+    notify "⚠️ Server backup over budget" 4 warning "Repo is $(gib "$size"), over the ${BUDGET_GB} GB budget even with only $MIN_KEEP restore points. Raise BUDGET_GB in $CONF."
+  fi
+}
+
+copy_minecraft() {  # second copy of mc-backup's repository, so an SSD failure doesn't take it with it
+  [[ -r $MC_PASS && -d $MC_SRC ]] || { log "no mc-backup repository; skipping the Minecraft copy"; return 0; }
+  if ! mc cat config >/dev/null 2>&1; then
+    mc init --from-repo "$MC_SRC" --from-password-file "$MC_PASS" --copy-chunker-params >/dev/null 2>&1 \
+      || fail "could not create the Minecraft copy repository at $MC_REPO"
+    log "created the Minecraft copy repository at $MC_REPO"
+  fi
+  local out
+  out=$(mc copy --from-repo "$MC_SRC" --from-password-file "$MC_PASS" 2>&1) || fail "Minecraft restic copy failed: $(tail -3 <<<"$out")"
+  mc forget "${MC_KEEP[@]}" --prune >/dev/null 2>&1 || log "warning: Minecraft copy forget/prune failed"
+  log "Minecraft copy: $(mc snapshots --json 2>/dev/null | jq length) snapshots, $(gib "$(size_of mc)")"
+}
+
+backup() {
+  mounted || fail "$MOUNT is not mounted - skipped so nothing lands on the SSD (check: lsblk, sudo mount $MOUNT)"
+  srv cat config >/dev/null 2>&1 || fail "server repository not found/readable at $REPO"
+  log "backup started"
+  stage
+  local args=() p
+  for p in "${PATHS[@]}" "$STAGE"; do [[ -e $p ]] && args+=("$p") || log "note: $p does not exist, skipped"; done
+  local ex=(); for p in "${EXCLUDES[@]}"; do ex+=(--exclude "$p"); done
+  local out
+  out=$(nice -n 10 ionice -c3 restic -r "$REPO" --password-file "$PASS" backup --host spencer-server --tag server \
+        --one-file-system --exclude-caches "${ex[@]}" "${args[@]}" 2>&1)
+  local rc=$?
+  # exit code 3 = some files could not be read (e.g. vanished mid-run): snapshot still saved, worth a log line only
+  if (( rc == 3 )); then log "warning: some files could not be read: $(grep -m3 -i 'error' <<<"$out" | paste -sd' ')"
+  elif (( rc != 0 )); then fail "restic backup error: $(tail -3 <<<"$out")"; fi
+  log "snapshot done: $(grep -E '^(Added to the repository|snapshot .* saved)' <<<"$out" | paste -sd' ')"
+  srv forget --tag server "${KEEP[@]}" --prune >/dev/null 2>&1 || log "warning: forget/prune failed"
+  enforce_budget
+  copy_minecraft
+  if [[ $(date +%u) == 7 ]]; then   # Sundays: structure check; first Sunday of the month: also read 5% of the data
+    local sub=(); (( $(date +%-d) <= 7 )) && sub=(--read-data-subset=5%)
+    srv check "${sub[@]}" >/dev/null 2>&1 || fail "weekly integrity check of the server backup FAILED"
+    mc check >/dev/null 2>&1 || fail "weekly integrity check of the Minecraft copy FAILED"
+    log "weekly integrity check OK${sub:+ (with 5% data read)}"
+  fi
+  date +%s > "$STATE/last-success"
+  printf 'snapshots=%s size=%s budget=%sG mc_copy=%s\n' "$(srv snapshots --json 2>/dev/null | jq length)" \
+    "$(gib "$(size_of srv)")" "$BUDGET_GB" "$(mc snapshots --json 2>/dev/null | jq length 2>/dev/null || echo 0)" > "$STATE/summary"
+  log "OK $(cat "$STATE/summary")"
+}
+
+case ${1:-backup} in
+  backup|now) backup ;;
+  list)    srv snapshots ;;
+  restore) [[ $# -ge 3 ]] || { echo "usage: homelab-backup restore <ID|latest> <path> [target]"; exit 1; }
+           target=${4:-/var/tmp/homelab-restore-$(date +%Y%m%d-%H%M%S)}
+           srv restore "$2" --target "$target" --include "$3" && echo "Restored $3 from $2 into $target (the live files were not touched)" ;;
+  mount)   dir=${2:-/mnt/restic}; mkdir -p "$dir"; echo "Browse $dir/snapshots/ ... Ctrl-C to stop."; srv mount "$dir" ;;
+  stats)   echo "server:    $(gib "$(size_of srv)") of ${BUDGET_GB}G budget, $(srv snapshots --json | jq length) snapshots"
+           echo "minecraft: $(gib "$(size_of mc)"), $(mc snapshots --json 2>/dev/null | jq length) snapshots"
+           df -h "$MOUNT" | tail -1 ;;
+  check)   srv check && mc check ;;
+  *) sed -n '2,20p' "$0"; exit 1 ;;
+esac

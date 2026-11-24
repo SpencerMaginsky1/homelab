@@ -1,0 +1,9 @@
+[Unit]
+Description=Full-server backup daily at 05:00 New York time (after the 03:30 Minecraft backup and 04:00 updates)
+
+[Timer]
+OnCalendar=*-*-* 05:00:00 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target
